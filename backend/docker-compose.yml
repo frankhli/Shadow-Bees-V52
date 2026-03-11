@@ -1,0 +1,130 @@
+version: '3.8'
+
+# Shadow-Bees V2 微服务基础设施
+# PostgreSQL + Redis (简化版，初期足够)
+# RabbitMQ/ES 后期按需添加
+
+services:
+  # ==========================================
+  # 1. PostgreSQL - 主数据库
+  # ==========================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: sb-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: shadowbees
+      POSTGRES_USER: sb_admin
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-shadowbees123}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sb_admin -d shadowbees"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sb-network
+
+  # ==========================================
+  # 2. Redis - 缓存 + 消息队列(轻量版)
+  # ==========================================
+  redis:
+    image: redis:7-alpine
+    container_name: sb-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - sb-network
+
+  # ==========================================
+  # 3. API Gateway (后期启用)
+  # ==========================================
+  # gateway:
+  #   build: ./packages/gateway
+  #   container_name: sb-gateway
+  #   restart: unless-stopped
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     - NODE_ENV=production
+  #     - DATABASE_URL=postgresql://sb_admin:${DB_PASSWORD:-shadowbees123}@postgres:5432/shadowbees
+  #     - REDIS_URL=redis://redis:6379
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   networks:
+  #     - sb-network
+
+  # ==========================================
+  # 4. Hotel Service (后期启用)
+  # ==========================================
+  # hotel-service:
+  #   build: ./packages/services/hotel-service
+  #   container_name: sb-hotel-service
+  #   restart: unless-stopped
+  #   ports:
+  #     - "3001:3001"
+  #   environment:
+  #     - NODE_ENV=production
+  #     - DATABASE_URL=postgresql://sb_admin:${DB_PASSWORD:-shadowbees123}@postgres:5432/shadowbees
+  #     - REDIS_URL=redis://redis:6379
+  #     - PORT=3001
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   networks:
+  #     - sb-network
+
+  # ==========================================
+  # 5. AI Service - Python (后期启用)
+  # ==========================================
+  # ai-service:
+  #   build: ./packages/ai-service
+  #   container_name: sb-ai-service
+  #   restart: unless-stopped
+  #   ports:
+  #     - "5000:5000"
+  #   environment:
+  #     - OPENAI_API_KEY=${OPENAI_API_KEY}
+  #   networks:
+  #     - sb-network
+
+# ==========================================
+# 数据卷
+# ==========================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+# ==========================================
+# 网络
+# ==========================================
+networks:
+  sb-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

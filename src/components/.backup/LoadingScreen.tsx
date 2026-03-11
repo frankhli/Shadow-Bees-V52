@@ -1,0 +1,97 @@
+import { motion } from 'framer-motion';
+import { useAppStore } from '@/stores/appStore';
+import { AnimatedLogo } from './AnimatedLogo';
+
+interface LoadingScreenProps {
+  text?: string;
+}
+
+export function LoadingScreen({ text = '正在加载...' }: LoadingScreenProps) {
+  const { currentHotel } = useAppStore();
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-bg-primary/95 backdrop-blur-sm"
+    >
+      {/* 动画Logo */}
+      <motion.div
+        initial={{ scale: 0.8, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ duration: 0.5 }}
+        className="mb-8"
+      >
+        <AnimatedLogo size={80} animate={true} />
+      </motion.div>
+
+      {/* 飞行轨迹装饰 */}
+      <div className="relative w-48 h-2 mb-8">
+        <motion.div
+          className="absolute inset-0 bg-gradient-to-r from-transparent via-neon-cyan/30 to-transparent rounded-full"
+          animate={{
+            scaleX: [0.5, 1, 0.5],
+            opacity: [0.3, 0.6, 0.3],
+          }}
+          transition={{
+            duration: 2,
+            repeat: Infinity,
+            ease: 'easeInOut',
+          }}
+        />
+        {/* 飞行粒子 */}
+        {[...Array(3)].map((_, i) => (
+          <motion.div
+            key={i}
+            className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-neon-cyan"
+            animate={{
+              x: [-20, 200],
+              opacity: [0, 1, 0],
+              scale: [0.5, 1, 0.5],
+            }}
+            transition={{
+              duration: 2,
+              repeat: Infinity,
+              delay: i * 0.3,
+              ease: 'easeOut',
+            }}
+          />
+        ))}
+      </div>
+
+      {/* 文字 */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.3 }}
+        className="text-center"
+      >
+        <div className="text-lg font-medium text-text-primary mb-2">{text}</div>
+        {currentHotel && (
+          <motion.div 
+            className="text-sm text-text-secondary"
+            animate={{ opacity: [0.5, 1, 0.5] }}
+            transition={{ duration: 1.5, repeat: Infinity }}
+          >
+            正在加载 {currentHotel.name} 数据...
+          </motion.div>
+        )}
+      </motion.div>
+
+      {/* 进度条 */}
+      <div className="mt-6 w-48 h-1 bg-bg-tertiary rounded-full overflow-hidden">
+        <motion.div
+          className="h-full bg-gradient-to-r from-neon-cyan to-neon-purple rounded-full"
+          initial={{ width: '0%' }}
+          animate={{ width: ['0%', '100%', '0%'] }}
+          transition={{
+            duration: 2,
+            repeat: Infinity,
+            ease: 'easeInOut',
+          }}
+        />
+      </div>
+    </motion.div>
+  );
+}

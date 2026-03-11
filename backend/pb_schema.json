@@ -1,0 +1,399 @@
+{
+  "collections": [
+    {
+      "id": "_pb_users_auth_",
+      "name": "users",
+      "type": "auth",
+      "system": true,
+      "schema": [
+        {
+          "id": "users_name",
+          "name": "name",
+          "type": "text",
+          "system": false,
+          "required": false,
+          "options": {
+            "min": null,
+            "max": null,
+            "pattern": ""
+          }
+        },
+        {
+          "id": "users_avatar",
+          "name": "avatar",
+          "type": "file",
+          "system": false,
+          "required": false,
+          "options": {
+            "maxSelect": 1,
+            "maxSize": 5242880,
+            "mimeTypes": [
+              "image/jpeg",
+              "image/png",
+              "image/svg+xml",
+              "image/gif",
+              "image/webp"
+            ],
+            "thumbs": null,
+            "protected": false
+          }
+        }
+      ],
+      "indexes": [],
+      "listRule": "id = @request.auth.id",
+      "viewRule": "id = @request.auth.id",
+      "createRule": "",
+      "updateRule": "id = @request.auth.id",
+      "deleteRule": "id = @request.auth.id",
+      "options": {
+        "allowEmailAuth": true,
+        "allowOAuth2Auth": true,
+        "allowUsernameAuth": true,
+        "exceptEmailDomains": null,
+        "manageRule": null,
+        "minPasswordLength": 8,
+        "onlyEmailDomains": null,
+        "requireEmail": false
+      }
+    },
+    {
+      "id": "hotels",
+      "name": "hotels",
+      "type": "base",
+      "system": false,
+      "schema": [
+        {
+          "id": "name",
+          "name": "name",
+          "type": "text",
+          "system": false,
+          "required": true
+        },
+        {
+          "id": "type",
+          "name": "type",
+          "type": "select",
+          "system": false,
+          "required": true,
+          "options": {
+            "maxSelect": 1,
+            "values": ["city", "suburb", "tourist"]
+          }
+        },
+        {
+          "id": "tier",
+          "name": "tier",
+          "type": "select",
+          "system": false,
+          "required": true,
+          "options": {
+            "maxSelect": 1,
+            "values": ["economy", "comfort", "premium"]
+          }
+        },
+        {
+          "id": "theme",
+          "name": "theme",
+          "type": "select",
+          "system": false,
+          "required": true,
+          "options": {
+            "maxSelect": 1,
+            "values": ["cyan", "violet", "amber"]
+          }
+        },
+        {
+          "id": "city",
+          "name": "city",
+          "type": "text",
+          "system": false,
+          "required": true
+        },
+        {
+          "id": "address",
+          "name": "address",
+          "type": "text",
+          "system": false,
+          "required": false
+        },
+        {
+          "id": "coordinates",
+          "name": "coordinates",
+          "type": "json",
+          "system": false,
+          "required": false
+        },
+        {
+          "id": "default_mode",
+          "name": "default_mode",
+          "type": "select",
+          "system": false,
+          "required": false,
+          "options": {
+            "maxSelect": 1,
+            "values": ["clearance", "scalper", "dynamic"]
+          }
+        },
+        {
+          "id": "script_strategy",
+          "name": "script_strategy",
+          "type": "text",
+          "system": false,
+          "required": false
+        },
+        {
+          "id": "flexible_inventory_rate",
+          "name": "flexible_inventory_rate",
+          "type": "number",
+          "system": false,
+          "required": false
+        }
+      ],
+      "listRule": "",
+      "viewRule": "",
+      "createRule": "",
+      "updateRule": "",
+      "deleteRule": "",
+      "options": {}
+    },
+    {
+      "id": "room_types",
+      "name": "room_types",
+      "type": "base",
+      "system": false,
+      "schema": [
+        {
+          "id": "hotel",
+          "name": "hotel",
+          "type": "relation",
+          "system": false,
+          "required": true,
+          "options": {
+            "collectionId": "hotels",
+            "cascadeDelete": true,
+            "minSelect": null,
+            "maxSelect": 1,
+            "displayFields": ["name"]
+          }
+        },
+        {
+          "id": "name",
+          "name": "name",
+          "type": "text",
+          "system": false,
+          "required": true
+        },
+        {
+          "id": "floor_price",
+          "name": "floor_price",
+          "type": "number",
+          "system": false,
+          "required": true
+        },
+        {
+          "id": "ceiling_price",
+          "name": "ceiling_price",
+          "type": "number",
+          "system": false,
+          "required": true
+        },
+        {
+          "id": "current_price",
+          "name": "current_price",
+          "type": "number",
+          "system": false,
+          "required": false
+        },
+        {
+          "id": "total_inventory",
+          "name": "total_inventory",
+          "type": "number",
+          "system": false,
+          "required": true
+        },
+        {
+          "id": "ota_allocation",
+          "name": "ota_allocation",
+          "type": "number",
+          "system": false,
+          "required": true
+        },
+        {
+          "id": "flexible_allocation",
+          "name": "flexible_allocation",
+          "type": "number",
+          "system": false,
+          "required": true
+        },
+        {
+          "id": "attributes",
+          "name": "attributes",
+          "type": "json",
+          "system": false,
+          "required": false
+        }
+      ],
+      "listRule": "",
+      "viewRule": "",
+      "createRule": "",
+      "updateRule": "",
+      "deleteRule": "",
+      "options": {}
+    },
+    {
+      "id": "orders",
+      "name": "orders",
+      "type": "base",
+      "system": false,
+      "schema": [
+        {
+          "id": "hotel",
+          "name": "hotel",
+          "type": "relation",
+          "system": false,
+          "required": true,
+          "options": {
+            "collectionId": "hotels",
+            "cascadeDelete": false,
+            "minSelect": null,
+            "maxSelect": 1,
+            "displayFields": ["name"]
+          }
+        },
+        {
+          "id": "room_type",
+          "name": "room_type",
+          "type": "relation",
+          "system": false,
+          "required": true,
+          "options": {
+            "collectionId": "room_types",
+            "cascadeDelete": false,
+            "minSelect": null,
+            "maxSelect": 1,
+            "displayFields": ["name"]
+          }
+        },
+        {
+          "id": "order_no",
+          "name": "order_no",
+          "type": "text",
+          "system": false,
+          "required": true
+        },
+        {
+          "id": "platform",
+          "name": "platform",
+          "type": "select",
+          "system": false,
+          "required": true,
+          "options": {
+            "maxSelect": 1,
+            "values": ["xianyu", "xiaohongshu", "wechat"]
+          }
+        },
+        {
+          "id": "source_content_id",
+          "name": "source_content_id",
+          "type": "text",
+          "system": false,
+          "required": false
+        },
+        {
+          "id": "customer_name",
+          "name": "customer_name",
+          "type": "text",
+          "system": false,
+          "required": false
+        },
+        {
+          "id": "customer_phone",
+          "name": "customer_phone",
+          "type": "text",
+          "system": false,
+          "required": false
+        },
+        {
+          "id": "check_in_date",
+          "name": "check_in_date",
+          "type": "date",
+          "system": false,
+          "required": true
+        },
+        {
+          "id": "check_out_date",
+          "name": "check_out_date",
+          "type": "date",
+          "system": false,
+          "required": true
+        },
+        {
+          "id": "price",
+          "name": "price",
+          "type": "number",
+          "system": false,
+          "required": true
+        },
+        {
+          "id": "nights",
+          "name": "nights",
+          "type": "number",
+          "system": false,
+          "required": true
+        },
+        {
+          "id": "total_amount",
+          "name": "total_amount",
+          "type": "number",
+          "system": false,
+          "required": true
+        },
+        {
+          "id": "platform_fee",
+          "name": "platform_fee",
+          "type": "number",
+          "system": false,
+          "required": false
+        },
+        {
+          "id": "net_revenue",
+          "name": "net_revenue",
+          "type": "number",
+          "system": false,
+          "required": false
+        },
+        {
+          "id": "status",
+          "name": "status",
+          "type": "select",
+          "system": false,
+          "required": true,
+          "options": {
+            "maxSelect": 1,
+            "values": ["pending", "paid", "checked_in", "checked_out", "invoiced", "refunded"]
+          }
+        },
+        {
+          "id": "timestamp",
+          "name": "timestamp",
+          "type": "date",
+          "system": false,
+          "required": true
+        },
+        {
+          "id": "notes",
+          "name": "notes",
+          "type": "text",
+          "system": false,
+          "required": false
+        }
+      ],
+      "listRule": "",
+      "viewRule": "",
+      "createRule": "",
+      "updateRule": "",
+      "deleteRule": "",
+      "options": {}
+    }
+  ]
+}

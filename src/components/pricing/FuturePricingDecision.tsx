@@ -1,0 +1,755 @@
+import { useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
+import { motion } from 'framer-motion';
+import {
+  TrendingUp, TrendingDown, Minus, 
+  Flame, CheckCircle, AlertCircle,
+  Sparkles, X
+} from 'lucide-react';
+import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+import { useUnifiedStore } from '@/stores/unifiedStore';
+
+
+// 状态颜色映射
+type StatusType = 'abundant' | 'normal' | 'tight' | 'soldout';
+const statusColors: Record<StatusType, { bg: string; border: string; text: string; label: string; dot: string }> = {
+  abundant: { bg: 'bg-green-500/10', border: 'border-green-500/30', text: 'text-green-400', label: '充足', dot: 'bg-green-400' },
+  normal: { bg: 'bg-blue-500/10', border: 'border-blue-500/30', text: 'text-blue-400', label: '正常', dot: 'bg-blue-400' },
+  tight: { bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', text: 'text-yellow-400', label: '紧张', dot: 'bg-yellow-400' },
+  soldout: { bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-400', label: '售罄', dot: 'bg-red-400' },
+};
+
+// 基于日期字符串生成伪随机数（确保同一天的价格固定）
+function seededRandom(seed: string): number {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    const char = seed.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // 转换为32位整数
+  }
+  // 归一化到 0-1
+  const x = Math.sin(hash) * 10000;
+  return x - Math.floor(x);
+}
+
+// 生成未来价格预测（基于日期生成固定值）
+function generateFuturePricingData(
+  basePrice: number,
+  competitors: any[],
+  events: any[],
+  days: number
+) {
+  const data: Record<string, {
+    date: string;
+    weekday: string;
+    dayName: string;
+    competitorAvg: number;
+    events: any[];
+    isWeekend: boolean;
+    suggestedPrice: number;
+    changePercent: string;
+    trend: 'up' | 'down' | 'stable';
+    inventoryStatus: StatusType;
+    confidence: number;
+  }> = {};
+
+  const today = new Date();
+
+  for (let i = 0; i < days; i++) {
+    const date = new Date(today);
+    date.setDate(date.getDate() + i);
+    const dateStr = date.toISOString().split('T')[0];
+    
+    const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+    const weekday = weekdays[date.getDay()];
+    const dayName = `${date.getMonth() + 1}/${date.getDate()}`;
+    
+    // 检查当天事件
+    const dayEvents = events.filter(e => {
+      const eventDate = new Date(e.date).toISOString().split('T')[0];
+      return eventDate === dateStr;
+    });
+    
+    // 计算事件影响系数
+    const hasHighImpact = dayEvents.some(e => e.intensity === 'high');
+    const hasMediumImpact = dayEvents.some(e => e.intensity === 'medium');
+    const eventMultiplier = hasHighImpact ? 1.25 : hasMediumImpact ? 1.12 : 1;
+    
+    // 周末溢价
+    const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+    const weekendMultiplier = isWeekend ? 1.15 : 1;
+    
+    // 基于日期生成固定的竞品价格（使用日期作为种子）
+    const competitorPrices = competitors.map((c, index) => {
+      const base = c.currentPrice || basePrice;
+      // 使用日期和竞品索引生成固定随机数（±10%波动）
+      const seed = `${dateStr}-${c.id || index}`;
+      const volatility = 0.9 + seededRandom(seed) * 0.2;
+      return Math.round(base * volatility * eventMultiplier * weekendMultiplier);
+    });
+    
+    // 计算竞品均价
+    const competitorAvg = competitorPrices.length > 0
+      ? Math.round(competitorPrices.reduce((a, b) => a + b, 0) / competitorPrices.length)
+      : basePrice;
+    
+    // 基于日期生成固定的AI建议价格
+    const priceSeed = `${dateStr}-ai-price`;
+    const priceMultiplier = 0.95 + seededRandom(priceSeed) * 0.1; // 0.95 - 1.05
+    const suggestedPrice = Math.round(
+      basePrice * eventMultiplier * weekendMultiplier * priceMultiplier
+    );
+    
+    // 计算变化
+    const diff = suggestedPrice - basePrice;
+    const changePercent = ((diff / basePrice) * 100).toFixed(1);
+    const trend = diff > 0 ? 'up' : diff < 0 ? 'down' : 'stable';
+    
+    // 库存状态预测（基于日期生成固定值）
+    const inventorySeed = `${dateStr}-inventory`;
+    const inventoryRandom = seededRandom(inventorySeed);
+    
+    let inventoryStatus: StatusType = 'normal';
+    if (hasHighImpact || (isWeekend && eventMultiplier > 1.2)) {
+      inventoryStatus = 'tight';
+    } else if (!isWeekend && !hasMediumImpact && suggestedPrice < basePrice * 0.95) {
+      inventoryStatus = 'abundant';
+    }
+    // 基于日期固定的售罄概率（约5%概率）
+    if (inventoryRandom < 0.05) inventoryStatus = 'soldout';
+    
+    data[dateStr] = {
+      date: dateStr,
+      weekday,
+      dayName,
+      competitorAvg,
+      events: dayEvents,
+      isWeekend,
+      suggestedPrice,
+      changePercent,
+      trend,
+      inventoryStatus,
+      confidence: Math.min(95, 70 + (hasHighImpact ? 15 : hasMediumImpact ? 10 : 0)),
+    };
+  }
+
+  return data;
+}
+
+// 确认弹窗组件
+function ConfirmDialog({
+  isOpen,
+  onClose,
+  onConfirm,
+  date,
+  suggestedPrice,
+  competitorAvg,
+  currentPrice,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  date: string;
+  suggestedPrice: number;
+  competitorAvg: number;
+  currentPrice: number;
+}) {
+  if (!isOpen) return null;
+
+  const modalContent = (
+    <div 
+      className="fixed inset-0 bg-black/70 flex items-center justify-center p-4"
+      style={{ 
+        position: 'fixed', 
+        top: 0, 
+        left: 0, 
+        right: 0, 
+        bottom: 0,
+        zIndex: 9999
+      }}
+      onClick={onClose}
+    >
+      <div 
+        className="bg-bg-secondary border border-border-color rounded-2xl p-6 max-w-md w-full shadow-2xl"
+        style={{ animation: 'modalPop 0.2s ease-out' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-full bg-[#00F0FF]/20 flex items-center justify-center">
+            <AlertCircle className="w-5 h-5 text-[#00F0FF]" />
+          </div>
+          <h3 className="text-lg font-semibold text-text-primary">确认应用定价</h3>
+        </div>
+
+        <p className="text-text-secondary mb-6">
+          您确定要将 <span className="text-text-primary font-medium">{date}</span> 的房价设置为{' '}
+          <span className="text-[#00F0FF] font-bold text-xl">¥{suggestedPrice}</span> 吗？
+        </p>
+
+        <div className="space-y-3 mb-6">
+          <div className="flex justify-between text-sm">
+            <span className="text-text-muted">当前底价</span>
+            <span className="text-text-secondary">¥{currentPrice}</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-text-muted">竞品均价</span>
+            <span className="text-purple-400">¥{competitorAvg}</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-text-muted">建议价格</span>
+            <span className="text-[#00F0FF] font-bold">¥{suggestedPrice}</span>
+          </div>
+          <div className="h-px bg-[#2D3A55] my-2" />
+          <div className="flex justify-between text-sm">
+            <span className="text-text-muted">价格变动</span>
+            <span className={suggestedPrice > currentPrice ? 'text-[#00E396]' : suggestedPrice < currentPrice ? 'text-[#FFB800]' : 'text-text-secondary'}>
+              {suggestedPrice > currentPrice ? '+' : ''}{((suggestedPrice - currentPrice) / currentPrice * 100).toFixed(1)}%
+            </span>
+          </div>
+        </div>
+
+        <div className="flex gap-3">
+          <Button
+            variant="outline"
+            className="flex-1 bg-bg-secondary border-border-color text-text-secondary hover:bg-border-color/50"
+            onClick={onClose}
+          >
+            <X className="w-4 h-4 mr-1" />
+            取消
+          </Button>
+          <Button
+            className="flex-1 bg-[#00F0FF]/20 text-[#00F0FF] border border-[#00F0FF] hover:bg-[#00F0FF]/30"
+            onClick={onConfirm}
+          >
+            <CheckCircle className="w-4 h-4 mr-1" />
+            确认应用
+          </Button>
+        </div>
+      </div>
+      <style>{`
+        @keyframes modalPop {
+          from { opacity: 0; transform: scale(0.95); }
+          to { opacity: 1; transform: scale(1); }
+        }
+      `}</style>
+    </div>
+  );
+
+  return createPortal(modalContent, document.body);
+}
+
+export function FuturePricingDecision() {
+  const {
+    pricing,
+    currentRoomType,
+    competitors,
+    events,
+    inventory,
+    updateDynamicPrice,
+    addAuditLog,
+  } = useUnifiedStore();
+
+  const [viewRange, setViewRange] = useState<7 | 14 | 30>(7);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [appliedDates, setAppliedDates] = useState<Set<string>>(new Set());
+  
+  // 确认弹窗状态
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    date: string;
+    suggestedPrice: number;
+    competitorAvg: number;
+  }>({
+    isOpen: false,
+    date: '',
+    suggestedPrice: 0,
+    competitorAvg: 0,
+  });
+
+  // 生成未来定价数据
+  const futureData = useMemo(() => {
+    const basePrice = currentRoomType?.floorPrice || pricing.basePrice;
+    return generateFuturePricingData(basePrice, competitors, events, viewRange);
+  }, [pricing.basePrice, currentRoomType, competitors, events, viewRange]);
+
+  // 获取日期数组
+  const dates = useMemo(() => {
+    return Object.keys(futureData).sort();
+  }, [futureData]);
+
+  // 获取统计数据
+  const stats = useMemo(() => {
+    const data = Object.values(futureData);
+    const upDays = data.filter(d => d.trend === 'up').length;
+    const downDays = data.filter(d => d.trend === 'down').length;
+    const stableDays = data.filter(d => d.trend === 'stable').length;
+    const avgPrice = Math.round(data.reduce((sum, d) => sum + d.suggestedPrice, 0) / data.length);
+    const maxPrice = Math.max(...data.map(d => d.suggestedPrice));
+    const minPrice = Math.min(...data.map(d => d.suggestedPrice));
+    
+    return { upDays, downDays, stableDays, avgPrice, maxPrice, minPrice };
+  }, [futureData]);
+
+  // 打开确认弹窗
+  const openConfirmDialog = (dateStr: string) => {
+    const data = futureData[dateStr];
+    if (!data) return;
+    
+    setConfirmDialog({
+      isOpen: true,
+      date: dateStr,
+      suggestedPrice: data.suggestedPrice,
+      competitorAvg: data.competitorAvg,
+    });
+  };
+
+  // 关闭确认弹窗
+  const closeConfirmDialog = () => {
+    setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+  };
+
+  // 确认应用价格
+  const confirmApplyPrice = () => {
+    const { date, suggestedPrice } = confirmDialog;
+    if (!date || !currentRoomType) return;
+
+    // 从库存日历中获取旧价格
+    const oldPrice = inventory.calendar?.[date]?.byRoomType?.[currentRoomType.id]?.dynamicPrice?.suggestedPrice 
+      || pricing.basePrice;
+    
+    // 应用价格
+    updateDynamicPrice(date, currentRoomType.id, suggestedPrice);
+    setAppliedDates(prev => new Set([...prev, date]));
+    
+    // 记录审计日志
+    addAuditLog({
+      action: '应用未来定价',
+      detail: `将 ${date} 的 ${currentRoomType.name} 价格从 ¥${oldPrice} 调整为 ¥${suggestedPrice}`,
+      level: 'normal',
+      metadata: {
+        date,
+        roomTypeId: currentRoomType.id,
+        roomTypeName: currentRoomType.name,
+        oldPrice,
+        newPrice: suggestedPrice,
+        competitorAvg: confirmDialog.competitorAvg,
+      },
+    });
+    
+    closeConfirmDialog();
+  };
+
+  // 应用价格到日历（单个日期）- 现在只是打开弹窗
+  const applyPrice = (dateStr: string) => {
+    openConfirmDialog(dateStr);
+  };
+
+  // 批量应用所有建议价格
+  const applyAllPrices = () => {
+    if (!currentRoomType) return;
+    
+    let appliedCount = 0;
+    const updates: { date: string; oldPrice: number; newPrice: number }[] = [];
+    
+    dates.forEach(dateStr => {
+      const data = futureData[dateStr];
+      if (data && !appliedDates.has(dateStr)) {
+        // 从库存日历中获取旧价格
+        const oldPrice = inventory.calendar?.[dateStr]?.byRoomType?.[currentRoomType.id]?.dynamicPrice?.suggestedPrice 
+          || pricing.basePrice;
+        updateDynamicPrice(dateStr, currentRoomType.id, data.suggestedPrice);
+        updates.push({ date: dateStr, oldPrice, newPrice: data.suggestedPrice });
+        appliedCount++;
+      }
+    });
+    
+    setAppliedDates(new Set(dates));
+    
+    // 记录审计日志
+    if (appliedCount > 0) {
+      addAuditLog({
+        action: '批量应用未来定价',
+        detail: `批量应用 ${appliedCount} 天的价格调整`,
+        level: 'normal',
+        metadata: {
+          roomTypeId: currentRoomType.id,
+          roomTypeName: currentRoomType.name,
+          appliedCount,
+          updates,
+        },
+      });
+    }
+  };
+
+  return (
+    <div className="space-y-6 text-text-primary">
+      {/* 确认弹窗 */}
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        onClose={closeConfirmDialog}
+        onConfirm={confirmApplyPrice}
+        date={confirmDialog.date}
+        suggestedPrice={confirmDialog.suggestedPrice}
+        competitorAvg={confirmDialog.competitorAvg}
+        currentPrice={currentRoomType?.floorPrice || pricing.basePrice}
+      />
+
+      {/* 标题和控制栏 */}
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <div>
+          <h3 className="text-xl font-semibold flex items-center gap-2">
+            <Sparkles className="w-6 h-6 text-[#00F0FF]" />
+            未来定价预测
+          </h3>
+          <p className="text-sm text-text-secondary mt-1">
+            基于竞品分析、事件预测、历史数据，AI预测未来价格走势
+          </p>
+        </div>
+
+        {/* 时间范围选择 */}
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-text-secondary mr-2">预测范围:</span>
+          {[7, 14, 30].map(days => (
+            <Button
+              key={days}
+              variant={viewRange === days ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => {
+                setViewRange(days as 7 | 14 | 30);
+                setSelectedDate(null);
+              }}
+              className={cn(
+                "text-xs",
+                viewRange === days
+                  ? "bg-[#00F0FF]/20 text-[#00F0FF] border-[#00F0FF]"
+                  : "bg-bg-secondary border-border-color text-text-secondary"
+              )}
+            >
+              {days}天
+            </Button>
+          ))}
+        </div>
+      </div>
+
+      {/* 统计概览 */}
+      <Card className="p-4 bg-bg-secondary border-border-color">
+        <div className="grid grid-cols-6 gap-4">
+          <div className="text-center">
+            <div className="text-xs text-text-secondary mb-1">预测天数</div>
+            <div className="text-2xl font-bold font-mono">{viewRange}</div>
+          </div>
+          <div className="text-center">
+            <div className="text-xs text-text-secondary mb-1">建议涨价</div>
+            <div className="text-2xl font-bold font-mono text-[#00E396]">{stats.upDays}天</div>
+          </div>
+          <div className="text-center">
+            <div className="text-xs text-text-secondary mb-1">建议降价</div>
+            <div className="text-2xl font-bold font-mono text-[#FFB800]">{stats.downDays}天</div>
+          </div>
+          <div className="text-center">
+            <div className="text-xs text-text-secondary mb-1">维持原价</div>
+            <div className="text-2xl font-bold font-mono text-text-secondary">{stats.stableDays}天</div>
+          </div>
+          <div className="text-center">
+            <div className="text-xs text-text-secondary mb-1">均价</div>
+            <div className="text-2xl font-bold font-mono text-[#00F0FF]">¥{stats.avgPrice}</div>
+          </div>
+          <div className="text-center">
+            <div className="text-xs text-text-secondary mb-1">价格区间</div>
+            <div className="text-sm font-mono">
+              <span className="text-[#00E396]">¥{stats.maxPrice}</span>
+              <span className="text-text-muted"> / </span>
+              <span className="text-[#FFB800]">¥{stats.minPrice}</span>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* 批量操作 */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-text-secondary">已应用: {appliedDates.size}天</span>
+          {appliedDates.size > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setAppliedDates(new Set())}
+              className="text-xs bg-bg-secondary border-border-color text-text-secondary"
+            >
+              重置
+            </Button>
+          )}
+        </div>
+        <Button
+          size="sm"
+          onClick={applyAllPrices}
+          className="bg-[#00F0FF]/20 text-[#00F0FF] border border-[#00F0FF] hover:bg-[#00F0FF]/30"
+        >
+          <CheckCircle className="w-4 h-4 mr-1" />
+          一键应用所有建议价格
+        </Button>
+      </div>
+
+      {/* 时间轴 */}
+      <div className="space-y-3">
+        {dates.map((dateStr, index) => {
+          const data = futureData[dateStr];
+          const isSelected = selectedDate === dateStr;
+          const isApplied = appliedDates.has(dateStr);
+          const colors = statusColors[data.inventoryStatus];
+          
+          return (
+            <motion.div
+              key={dateStr}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.03 }}
+              onClick={() => setSelectedDate(isSelected ? null : dateStr)}
+              className={cn(
+                "relative p-4 rounded-xl border cursor-pointer transition-all",
+                "bg-bg-secondary border-border-color hover:border-border-color/80",
+                isSelected && "ring-2 ring-[#00F0FF] border-[#00F0FF]/50",
+                isApplied && "border-[#00E396]/30 bg-[#00E396]/5"
+              )}
+            >
+              {/* 日期列 */}
+              <div className="flex items-center gap-4">
+                <div className="w-16 text-center">
+                  <div className="text-lg font-bold">{data.dayName}</div>
+                  <div className={cn(
+                    "text-xs",
+                    data.isWeekend ? "text-[#00F0FF]" : "text-text-muted"
+                  )}>
+                    {data.weekday}
+                  </div>
+                  {index === 0 && (
+                    <Badge variant="outline" className="text-[8px] mt-1 border-[#00F0FF] text-[#00F0FF] px-1">
+                      今天
+                    </Badge>
+                  )}
+                </div>
+
+                {/* 事件标记 */}
+                <div className="w-24">
+                  {data.events.length > 0 ? (
+                    <div className="space-y-1">
+                      {data.events.map((e, i) => (
+                        <div key={i} className="flex items-center gap-1">
+                          <Flame className={cn(
+                            "w-3 h-3",
+                            e.intensity === 'high' ? "text-red-400" : "text-yellow-400"
+                          )} />
+                          <span className="text-xs text-text-secondary truncate">{e.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-xs text-text-muted">无特殊事件</span>
+                  )}
+                </div>
+
+                {/* 竞品均价 */}
+                <div className="w-28 text-center">
+                  <div className="text-xs text-text-secondary mb-1">竞品均价</div>
+                  <div className="text-lg font-mono text-purple-400">¥{data.competitorAvg}</div>
+                  <div className="text-xs text-text-muted">
+                    vs 底价 {data.competitorAvg > pricing.basePrice ? '+' : ''}
+                    {((data.competitorAvg - pricing.basePrice) / pricing.basePrice * 100).toFixed(0)}%
+                  </div>
+                </div>
+
+                {/* 箭头 */}
+                <div className="text-text-muted">
+                  {data.trend === 'up' ? (
+                    <TrendingUp className="w-5 h-5 text-[#00E396]" />
+                  ) : data.trend === 'down' ? (
+                    <TrendingDown className="w-5 h-5 text-[#FFB800]" />
+                  ) : (
+                    <Minus className="w-5 h-5 text-text-muted" />
+                  )}
+                </div>
+
+                {/* AI建议价格 */}
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl font-bold font-mono text-[#00F0FF]">
+                      ¥{data.suggestedPrice}
+                    </span>
+                    <span className={cn(
+                      "text-sm font-medium",
+                      data.trend === 'up' ? 'text-[#00E396]' : 
+                      data.trend === 'down' ? 'text-[#FFB800]' : 'text-text-secondary'
+                    )}>
+                      {data.trend === 'up' ? '+' : ''}{data.changePercent}%
+                    </span>
+                    {isApplied && (
+                      <Badge variant="outline" className="text-[10px] border-[#00E396] text-[#00E396]">
+                        已应用
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="text-xs text-text-muted mt-1">
+                    置信度 {data.confidence}% · 基于{competitors.length}家竞品
+                  </div>
+                </div>
+
+                {/* 库存状态 */}
+                <div className="w-24 text-center">
+                  <div className={cn("w-3 h-3 rounded-full mx-auto mb-1", colors.dot)} />
+                  <div className={cn("text-xs", colors.text)}>{colors.label}</div>
+                  {data.inventoryStatus === 'tight' && (
+                    <div className="text-[10px] text-yellow-400">建议涨价</div>
+                  )}
+                </div>
+
+                {/* 操作按钮 */}
+                <div className="pointer-events-auto" onClick={(e) => e.stopPropagation()}>
+                  <Button
+                    size="sm"
+                    variant={isApplied ? "outline" : "default"}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      applyPrice(dateStr);
+                    }}
+                    disabled={isApplied}
+                    className={cn(
+                      "min-w-[80px] pointer-events-auto",
+                      isApplied 
+                        ? "bg-[#00E396]/10 border-[#00E396] text-[#00E396] cursor-default" 
+                        : "bg-[#00F0FF]/20 text-[#00F0FF] border border-[#00F0FF] hover:bg-[#00F0FF]/30"
+                    )}
+                  >
+                    {isApplied ? '已应用' : '应用'}
+                  </Button>
+                </div>
+              </div>
+
+              {/* 展开详情 */}
+              {isSelected && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  className="mt-4 pt-4 border-t border-border-color"
+                >
+                  <div className="grid grid-cols-4 gap-4">
+                    <div className="space-y-2">
+                      <div className="text-xs text-text-secondary">定价依据</div>
+                      <div className="text-sm space-y-1">
+                        <div className="flex justify-between">
+                          <span className="text-text-muted">基础底价</span>
+                          <span>¥{pricing.basePrice}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-text-muted">事件系数</span>
+                          <span className={data.events.length > 0 ? 'text-[#FFB800]' : ''}>
+                            {data.events.length > 0 ? '×1.25' : '×1.0'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-text-muted">周末溢价</span>
+                          <span className={data.isWeekend ? 'text-[#00F0FF]' : ''}>
+                            {data.isWeekend ? '×1.15' : '×1.0'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="text-xs text-text-secondary">竞品对比</div>
+                      <div className="text-sm space-y-1">
+                        <div className="flex justify-between">
+                          <span className="text-text-muted">监测竞品</span>
+                          <span>{competitors.length}家</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-text-muted">均价范围</span>
+                          <span className="text-purple-400">
+                            ¥{Math.min(data.competitorAvg, pricing.basePrice)} - 
+                            ¥{Math.max(data.competitorAvg, pricing.basePrice)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-text-muted">我方定位</span>
+                          <span className={data.suggestedPrice > data.competitorAvg ? 'text-[#00E396]' : 'text-[#FFB800]'}>
+                            {data.suggestedPrice > data.competitorAvg ? '高端' : '性价比'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="text-xs text-text-secondary">库存预测</div>
+                      <div className="text-sm space-y-1">
+                        <div className="flex justify-between">
+                          <span className="text-text-muted">预计状态</span>
+                          <span className={colors.text}>{colors.label}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-text-muted">建议策略</span>
+                          <span className={data.inventoryStatus === 'tight' ? 'text-[#00E396]' : data.inventoryStatus === 'abundant' ? 'text-[#FFB800]' : ''}>
+                            {data.inventoryStatus === 'tight' ? '提价或关房' : 
+                             data.inventoryStatus === 'abundant' ? '促销引流' : '维持监控'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="text-xs text-text-secondary">快速操作</div>
+                      <div className="space-y-2">
+                        <Button
+                          size="sm"
+                          className="w-full bg-[#00F0FF]/20 text-[#00F0FF] border border-[#00F0FF] hover:bg-[#00F0FF]/30"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            applyPrice(dateStr);
+                          }}
+                        >
+                          <CheckCircle className="w-3 h-3 mr-1" />
+                          应用建议价格
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="w-full bg-bg-secondary border-border-color"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const newPrice = prompt('自定义价格:', data.suggestedPrice.toString());
+                            if (newPrice && currentRoomType) {
+                              const priceNum = parseInt(newPrice);
+                              updateDynamicPrice(dateStr, currentRoomType.id, priceNum);
+                              setAppliedDates(prev => new Set([...prev, dateStr]));
+                              // 记录自定义价格的审计日志
+                              addAuditLog({
+                                action: '自定义未来定价',
+                                detail: `将 ${dateStr} 的 ${currentRoomType.name} 价格自定义为 ¥${priceNum}`,
+                                level: 'normal',
+                                metadata: {
+                                  date: dateStr,
+                                  roomTypeId: currentRoomType.id,
+                                  roomTypeName: currentRoomType.name,
+                                  suggestedPrice: data.suggestedPrice,
+                                  customPrice: priceNum,
+                                },
+                              });
+                            }
+                          }}
+                        >
+                          自定义价格
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </motion.div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

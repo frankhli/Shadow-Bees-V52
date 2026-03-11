@@ -1,0 +1,195 @@
+# Shadow-Bees 完整部署配置（前端 + 后端）
+# 使用方法:
+# 1. 确保后端 .env.production 已配置
+# 2. 运行: docker-compose -f docker-compose.full.yml up -d
+
+version: '3.8'
+
+services:
+  # ==========================================
+  # PostgreSQL 数据库
+  # ==========================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: sb-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: shadowbees
+      POSTGRES_USER: sb_admin
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-shadowbees123}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - sb-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sb_admin -d shadowbees"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================
+  # Redis 缓存
+  # ==========================================
+  redis:
+    image: redis:7-alpine
+    container_name: sb-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    networks:
+      - sb-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ==========================================
+  # API Gateway - 后端统一入口
+  # ==========================================
+  gateway:
+    build:
+      context: ./backend/packages/gateway
+      dockerfile: Dockerfile
+    container_name: sb-gateway
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_URL=postgresql://sb_admin:${DB_PASSWORD:-shadowbees123}@postgres:5432/shadowbees
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=${JWT_SECRET:-your-secret-key}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - sb-network
+
+  # ==========================================
+  # Hotel Service
+  # ==========================================
+  hotel-service:
+    build:
+      context: ./backend/packages/services/hotel-service
+      dockerfile: Dockerfile
+    container_name: sb-hotel-service
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DATABASE_URL=postgresql://sb_admin:${DB_PASSWORD:-shadowbees123}@postgres:5432/shadowbees
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - sb-network
+
+  # ==========================================
+  # Order Service
+  # ==========================================
+  order-service:
+    build:
+      context: ./backend/packages/services/order-service
+      dockerfile: Dockerfile
+    container_name: sb-order-service
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3002
+      - DATABASE_URL=postgresql://sb_admin:${DB_PASSWORD:-shadowbees123}@postgres:5432/shadowbees
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - sb-network
+
+  # ==========================================
+  # Inventory Service
+  # ==========================================
+  inventory-service:
+    build:
+      context: ./backend/packages/services/inventory-service
+      dockerfile: Dockerfile
+    container_name: sb-inventory-service
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3003
+      - DATABASE_URL=postgresql://sb_admin:${DB_PASSWORD:-shadowbees123}@postgres:5432/shadowbees
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - sb-network
+
+  # ==========================================
+  # Pricing Service
+  # ==========================================
+  pricing-service:
+    build:
+      context: ./backend/packages/services/pricing-service
+      dockerfile: Dockerfile
+    container_name: sb-pricing-service
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3004
+      - DATABASE_URL=postgresql://sb_admin:${DB_PASSWORD:-shadowbees123}@postgres:5432/shadowbees
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - sb-network
+
+  # ==========================================
+  # AI Service
+  # ==========================================
+  ai-service:
+    build:
+      context: ./backend/packages/ai-service
+      dockerfile: Dockerfile
+    container_name: sb-ai-service
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3005
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+    networks:
+      - sb-network
+
+  # ==========================================
+  # 前端 Nginx
+  # ==========================================
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: sb-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - gateway
+    networks:
+      - sb-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  sb-network:
+    driver: bridge

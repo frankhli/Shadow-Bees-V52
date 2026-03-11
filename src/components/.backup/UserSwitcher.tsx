@@ -1,0 +1,196 @@
+import React from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Users, Shield, ChevronDown, Crown, UserCircle, User } from 'lucide-react';
+import { useUnifiedStore } from '@/stores/unifiedStore';
+import { demoUsers } from '@/stores/unifiedStore';
+import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+
+const roleConfig = {
+  owner: { label: '老板', color: 'bg-[#A855F7]/20 text-[#A855F7] border-[#A855F7]/30', icon: Crown, iconBg: 'bg-[#A855F7]/30' },
+  manager: { label: '经理', color: 'bg-[#00F0FF]/20 text-[#00F0FF] border-[#00F0FF]/30', icon: UserCircle, iconBg: 'bg-[#00F0FF]/30' },
+  staff: { label: '员工', color: 'bg-gray-500/20 text-gray-300 border-gray-500/30', icon: User, iconBg: 'bg-gray-500/30' },
+};
+
+export function UserSwitcher() {
+  const { user, switchUser } = useUnifiedStore();
+  const [isOpen, setIsOpen] = React.useState(false);
+
+  const currentUser = demoUsers.find(u => u.id === user.id) || demoUsers[0];
+
+  return (
+    <div className="relative">
+      <Button
+        variant="outline"
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center gap-2 bg-bg-secondary border-border-color text-text-primary hover:bg-border-color"
+      >
+        <div className={cn("w-7 h-7 rounded-full flex items-center justify-center", roleConfig[currentUser.role].iconBg)}>
+          {(() => {
+            const Icon = roleConfig[currentUser.role].icon;
+            return <Icon size={16} strokeWidth={2} className="text-text-primary" />;
+          })()}
+        </div>
+        <span className="hidden sm:inline">{currentUser.name}</span>
+        <Badge className={cn("text-xs border", roleConfig[currentUser.role].color)}>
+          {roleConfig[currentUser.role].label}
+        </Badge>
+        <ChevronDown className={cn("w-4 h-4 transition-transform", isOpen && "rotate-180")} />
+      </Button>
+
+      <AnimatePresence>
+        {isOpen && (
+          <>
+            <div 
+              className="fixed inset-0 z-40" 
+              onClick={() => setIsOpen(false)} 
+            />
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="absolute right-0 top-full mt-2 w-80 z-50"
+            >
+              <Card className="p-4 shadow-lg bg-bg-secondary border-border-color">
+                <div className="text-sm font-medium text-text-secondary mb-3 flex items-center gap-2">
+                  <Users className="w-4 h-4 text-[#00F0FF]" />
+                  切换用户角色
+                </div>
+                
+                <div className="space-y-2">
+                  {demoUsers.map((demoUser) => (
+                    <button
+                      key={demoUser.id}
+                      onClick={() => {
+                        switchUser(demoUser);
+                        setIsOpen(false);
+                      }}
+                      className={cn(
+                        "w-full p-3 rounded-lg border text-left transition-all",
+                        user.id === demoUser.id
+                          ? "border-[#00F0FF] bg-[#00F0FF]/10"
+                          : "border-border-color hover:bg-border-color/50"
+                      )}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={cn("w-10 h-10 rounded-full flex items-center justify-center", roleConfig[demoUser.role].iconBg)}>
+                          {(() => {
+                            const Icon = roleConfig[demoUser.role].icon;
+                            return <Icon size={20} strokeWidth={2} className="text-text-primary" />;
+                          })()}
+                        </div>
+                        <div className="flex-1">
+                          <div className="font-medium text-text-primary">{demoUser.name}</div>
+                          <Badge className={cn("text-xs mt-1 border", roleConfig[demoUser.role].color)}>
+                            {roleConfig[demoUser.role].label}
+                          </Badge>
+                        </div>
+                        {user.id === demoUser.id && (
+                          <div className="w-2 h-2 bg-[#00F0FF] rounded-full" />
+                        )}
+                      </div>
+                      
+                      {/* 权限概览 */}
+                      <div className="mt-2 pt-2 border-t border-border-color text-xs text-text-muted grid grid-cols-2 gap-1">
+                        <div className={cn(!demoUser.permissions.canChangeFloorPrice && "text-text-muted line-through")}>
+                          修改底价
+                        </div>
+                        <div className={cn(!demoUser.permissions.canApprove && "text-text-muted line-through")}>
+                          审批权限
+                        </div>
+                        <div className={cn(!demoUser.permissions.canViewFinance && "text-text-muted line-through")}>
+                          查看财务
+                        </div>
+                        <div className={cn(!demoUser.permissions.canViewAudit && "text-text-muted line-through")}>
+                          查看审计
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+
+                {/* 当前权限说明 */}
+                <div className="mt-4 p-3 bg-bg-primary rounded-lg text-xs text-text-secondary border border-border-color/50">
+                  <div className="font-medium mb-2 flex items-center gap-1 text-gray-300">
+                    <Shield className="w-3 h-3 text-[#00F0FF]" />
+                    当前权限说明
+                  </div>
+                  {user.role === 'owner' && (
+                    <div>您是老板，拥有所有操作权限，可以审批所有申请。</div>
+                  )}
+                  {user.role === 'manager' && (
+                    <div>您是经理，可以调价但无法修改底价，可以审批员工申请。</div>
+                  )}
+                  {user.role === 'staff' && (
+                    <div>您是员工，无法直接修改价格，需要向上级申请底价调整。</div>
+                  )}
+                </div>
+              </Card>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// 权限不足提示组件
+export function PermissionDenied({ action }: { action: string }) {
+  const { user } = useUnifiedStore();
+  
+  return (
+    <div className="p-4 bg-[#FFB800]/10 border border-[#FFB800]/30 rounded-lg">
+      <div className="flex items-start gap-3">
+        <Shield className="w-5 h-5 text-[#FFB800] mt-0.5" />
+        <div>
+          <div className="font-medium text-[#FFB800]">权限不足</div>
+          <div className="text-sm text-text-secondary mt-1">
+            您当前是「{roleConfig[user.role].label}」，没有权限{action}。
+          </div>
+          {user.role === 'staff' && (
+            <div className="text-xs text-text-muted mt-2">
+              请联系经理或老板进行操作。
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 需要审批提示组件
+export function ApprovalRequired({ 
+  requestedPrice, 
+  currentPrice, 
+  onRequest 
+}: { 
+  requestedPrice: number; 
+  currentPrice: number;
+  onRequest: () => void;
+}) {
+  return (
+    <div className="p-4 bg-[#00F0FF]/10 border border-[#00F0FF]/30 rounded-lg">
+      <div className="flex items-start gap-3">
+        <div className="w-5 h-5 rounded-full bg-[#00F0FF]/20 flex items-center justify-center mt-0.5">
+          <span className="text-[#00F0FF] text-xs">!</span>
+        </div>
+        <div className="flex-1">
+          <div className="font-medium text-[#00F0FF]">需要审批</div>
+          <div className="text-sm text-text-secondary mt-1">
+            您申请将价格从 ¥{currentPrice} 调整至 ¥{requestedPrice}，
+            该操作需要老板或经理审批。
+          </div>
+          <Button 
+            size="sm" 
+            className="mt-3 bg-[#00F0FF]/20 text-[#00F0FF] border border-[#00F0FF]/30 hover:bg-[#00F0FF]/30"
+            onClick={onRequest}
+          >
+            提交审批申请
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,104 @@
+/**
+ * 发光按钮组件
+ * 演示效果：悬停时发光，点击时有涟漪反馈
+ */
+
+import { motion } from 'framer-motion';
+import { ReactNode, useState } from 'react';
+
+interface GlowButtonProps {
+  children: ReactNode;
+  onClick?: () => void;
+  className?: string;
+  glowColor?: string;
+  disabled?: boolean;
+  variant?: 'primary' | 'secondary' | 'ghost';
+}
+
+export function GlowButton({
+  children,
+  onClick,
+  className = '',
+  glowColor = '#00D4FF',
+  disabled = false,
+  variant = 'primary',
+}: GlowButtonProps) {
+  const [isHovered, setIsHovered] = useState(false);
+
+  const baseClasses = 'relative px-6 py-3 rounded-lg font-medium transition-all duration-300 overflow-hidden';
+  
+  const variantClasses = {
+    primary: 'bg-neon-cyan text-black',
+    secondary: 'bg-bg-tertiary border border-border-color text-white',
+    ghost: 'bg-transparent text-white hover:bg-white/5',
+  };
+
+  return (
+    <motion.button
+      className={`${baseClasses} ${variantClasses[variant]} ${className}`}
+      onClick={onClick}
+      disabled={disabled}
+      onHoverStart={() => setIsHovered(true)}
+      onHoverEnd={() => setIsHovered(false)}
+      whileHover={{ scale: disabled ? 1 : 1.02 }}
+      whileTap={{ scale: disabled ? 1 : 0.98 }}
+      style={{
+        boxShadow: isHovered && !disabled
+          ? `0 0 30px ${glowColor}40, 0 0 60px ${glowColor}20`
+          : 'none',
+      }}
+    >
+      {/* 发光背景 */}
+      <motion.div
+        className="absolute inset-0 opacity-0"
+        animate={{
+          opacity: isHovered && !disabled ? 1 : 0,
+        }}
+        style={{
+          background: `radial-gradient(circle at center, ${glowColor}20 0%, transparent 70%)`,
+        }}
+      />
+      
+      {/* 内容 */}
+      <span className="relative z-10">{children}</span>
+    </motion.button>
+  );
+}
+
+/**
+ * 脉冲按钮（用于重要操作）
+ */
+export function PulseButton({
+  children,
+  onClick,
+  className = '',
+  glowColor = '#00D4FF',
+}: GlowButtonProps) {
+  return (
+    <motion.button
+      className={`relative px-6 py-3 rounded-lg font-medium bg-neon-cyan text-black overflow-hidden ${className}`}
+      onClick={onClick}
+      whileHover={{ scale: 1.02 }}
+      whileTap={{ scale: 0.98 }}
+    >
+      {/* 脉冲环 */}
+      <motion.div
+        className="absolute inset-0 rounded-lg"
+        style={{ border: `2px solid ${glowColor}` }}
+        animate={{
+          scale: [1, 1.1, 1],
+          opacity: [0.5, 0, 0.5],
+        }}
+        transition={{
+          duration: 2,
+          repeat: Infinity,
+          ease: 'easeInOut',
+        }}
+      />
+      
+      <span className="relative z-10">{children}</span>
+    </motion.button>
+  );
+}
+
+export default GlowButton;

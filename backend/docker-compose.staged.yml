@@ -1,0 +1,88 @@
+version: '3.8'
+
+# 渐进式启用微服务
+# 阶段1：只启动 Gateway + Hotel Service
+# 其他模块通过共享库在 Gateway 内运行
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: sb-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: shadowbees
+      POSTGRES_USER: sb_admin
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-shadowbees123}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - sb-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: sb-redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - sb-network
+
+  # 阶段1：只启动这2个服务
+  gateway:
+    build: ./packages/gateway
+    container_name: sb-gateway
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://sb_admin:${DB_PASSWORD:-shadowbees123}@postgres:5432/shadowbees
+      - REDIS_URL=redis://redis:6379
+      # 阶段1：其他服务走内部调用
+      - INTERNAL_MODE=true
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - sb-network
+
+  hotel-service:
+    build: ./packages/services/hotel-service
+    container_name: sb-hotel-service
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://sb_admin:${DB_PASSWORD:-shadowbees123}@postgres:5432/shadowbees
+      - REDIS_URL=redis://redis:6379
+      - PORT=3001
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - sb-network
+
+  # 阶段2再启用（现在注释掉）
+  # order-service:
+  #   build: ./packages/services/order-service
+  #   ...
+  
+  # 阶段3再启用
+  # inventory-service:
+  # pricing-service:
+  # content-service:
+  # ai-service:
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  sb-network:
+    driver: bridge

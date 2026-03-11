@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shadow-Bees V52 · 希遇科技 · 智能收益管理系统</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* ============================================
+       EDITABLE: START - 全局样式配置
+       修改以下CSS变量可自定义主题色
+       ============================================ */
+    :root {
+      /* 背景层级 - 可编辑 */
+      --bg-primary: #0A0E1A;
+      --bg-secondary: #141B2D;
+      --bg-tertiary: #1E2738;
+      
+      /* 霓虹色 - 可编辑 */
+      --neon-cyan: #00F0FF;
+      --neon-amber: #FFB800;
+      --neon-red: #FF4757;
+      --neon-purple: #A855F7;
+      --neon-green: #00E396;
+      
+      /* 文字层级 - 可编辑 */
+      --text-primary: #FFFFFF;
+      --text-secondary: #8B9AAF;
+      --text-muted: #4A5568;
+      --border-color: #2D3A55;
+    }
+    /* EDITABLE: END */
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+    }
+
+    /* 霓虹发光效果 */
+    .neon-cyan { color: var(--neon-cyan); text-shadow: 0 0 10px rgba(0, 240, 255, 0.5); }
+    .neon-amber { color: var(--neon-amber); text-shadow: 0 0 10px rgba(255, 184, 0, 0.5); }
+    .neon-red { color: var(--neon-red); text-shadow: 0 0 10px rgba(255, 71, 87, 0.5); }
+    
+    /* 数据数字等宽 */
+    .font-mono { font-family: 'Roboto Mono', monospace; }
+    
+    /* 动画 */
+    @keyframes number-roll {
+      from { transform: translateY(-100%); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    @keyframes neon-pulse {
+      0%, 100% { box-shadow: 0 0 5px currentColor; }
+      50% { box-shadow: 0 0 20px currentColor, 0 0 40px currentColor; }
+    }
+    @keyframes radar-sweep {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .radar-sweep { animation: radar-sweep 2s linear infinite; }
+    .neon-pulse { animation: neon-pulse 2s ease-in-out infinite; }
+    
+    /* 组件样式 */
+    .card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 24px;
+    }
+    .card-hover:hover {
+      border-color: var(--neon-cyan);
+      box-shadow: 0 0 20px rgba(0, 240, 255, 0.2);
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--neon-cyan) 0%, #00C2FF 100%);
+      color: var(--bg-primary);
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-primary:hover { transform: scale(1.02); box-shadow: 0 0 20px rgba(0, 240, 255, 0.4); }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+    const { motion, AnimatePresence } = window.Motion;
+
+    // ============================================
+    // EDITABLE: START - 数据配置区域
+    // 修改以下数据可自定义演示内容
+    // ============================================
+    
+    // 酒店数据 - 可编辑
+    const HOTELS_DATA = [
+      {
+        id: 'sanlitun',
+        name: '三里屯潮流酒店',
+        theme: 'cyan',
+        location: { city: '北京', address: '朝阳区三里屯路XX号' },
+        roomTypes: [
+          { id: 'deluxe', name: '豪华大床房', floorPrice: 420, ceilingPrice: 800 },
+        ],
+        defaultMode: 'clearance',
+        scriptStrategy: '促销紧迫话术',
+      },
+      {
+        id: 'chongli',
+        name: '崇礼星空酒店',
+        theme: 'violet',
+        location: { city: '张家口', address: '崇礼区雪场路XX号' },
+        roomTypes: [
+          { id: 'star', name: '星空观景房', floorPrice: 450, ceilingPrice: 850 },
+        ],
+        defaultMode: 'scalper',
+        scriptStrategy: '紧迫稀缺话术',
+      },
+      {
+        id: 'dali',
+        name: '大理洱海酒店',
+        theme: 'amber',
+        location: { city: '大理', address: '古城区洱海西路XX号' },
+        roomTypes: [
+          { id: 'lake', name: '湖景大床房', floorPrice: 500, ceilingPrice: 950 },
+        ],
+        defaultMode: 'dynamic',
+        scriptStrategy: '价值对比话术',
+      },
+    ];
+
+    // 竞品数据 - 可编辑
+    const COMPETITORS_DATA = {
+      sanlitun: [
+        { name: '亚朵酒店', brand: '亚朵', price: 880, inventory: 0, status: 'soldout', distance: 0.8 },
+        { name: '桔子水晶', brand: '桔子', price: 720, inventory: 2, status: 'tight', distance: 1.2 },
+        { name: '全季酒店', brand: '全季', price: 550, inventory: 12, status: 'available', distance: 1.5 },
+      ],
+      chongli: [
+        { name: '云顶大酒店', brand: '云顶', price: 580, inventory: 5, status: 'tight', distance: 1.0 },
+        { name: '万龙滑雪场', brand: '万龙', price: 420, inventory: 15, status: 'available', distance: 2.5 },
+      ],
+      dali: [
+        { name: '大理古城亚朵', brand: '亚朵', price: 480, inventory: 8, status: 'available', distance: 2.0 },
+        { name: '洱海一号', brand: '本地', price: 420, inventory: 10, status: 'available', distance: 0.5 },
+      ],
+    };
+
+    // 平台Logo - 可编辑（使用真实官方Logo）
+    const PLATFORM_LOGOS = {
+      xianyu: 'https://img.alicdn.com/tfs/TB1Z._XP7voK1RjSZFwXXciCFXa-200-200.png',
+      xiaohongshu: 'https://ci.xiaohongshu.com/83e7c62e-62c5-4e11-9ba0-2b85c5e5c4e4',
+      douyin: 'https://p3-pc.douyinpic.com/img/aweme-avatar/tos-cn-avt-0015/6c6f89d6d6d6d6d6d6d6d6d6d6d6d6d6.jpeg',
+    };
+
+    // 主题色配置 - 可编辑
+    const THEME_COLORS = {
+      cyan: { primary: '#00F0FF', gradient: 'linear-gradient(135deg, #00F0FF 0%, #00C2FF 100%)' },
+      violet: { primary: '#A855F7', gradient: 'linear-gradient(135deg, #A855F7 0%, #7C3AED 100%)' },
+      amber: { primary: '#FFB800', gradient: 'linear-gradient(135deg, #FFB800 0%, #F59E0B 100%)' },
+    };
+
+    // 定价模式 - 可编辑
+    const MODE_CONFIG = {
+      scalper: { label: '黄牛模式', color: '#FF4757', icon: '🟥', description: '紧迫稀缺话术' },
+      dynamic: { label: '动态模式', color: '#FFB800', icon: '🟡', description: '价值对比话术' },
+      clearance: { label: '尾货模式', color: '#00E396', icon: '🟢', description: '促销捡漏话术' },
+    };
+
+    // EDITABLE: END
+    // ============================================
+
+    // 格式化价格
+    const formatPrice = (price) => `¥${price.toLocaleString()}`;
+
+    // ============================================
+    // 主要组件
+    // ============================================
+
+    // Logo组件
+    function DomeSeeLogo() {
+      return (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ 
+            width: 40, height: 40, borderRadius: '50%', 
+            background: 'linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: 'white', fontWeight: 'bold', fontSize: 12
+          }}>
+            DOM
+          </div>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 600 }}>Shadow-Bees</div>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+              希遇科技 · 智能收益管理系统
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // 加载屏幕
+    function LoadingScreen({ text, theme }) {
+      return (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9999,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            background: 'var(--bg-primary)'
+          }}
+        >
+          <div style={{
+            width: 80, height: 80, borderRadius: '50%',
+            background: 'linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: 'white', fontWeight: 'bold', fontSize: 24, marginBottom: 24
+          }}>
+            DOM
+          </div>
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+            style={{
+              width: 48, height: 48, borderRadius: '50%',
+              border: '3px solid var(--border-color)',
+              borderTopColor: theme.primary,
+            }}
+          />
+          <div style={{ marginTop: 24, textAlign: 'center' }}>
+            <div style={{ fontSize: 16, marginBottom: 8 }}>{text}</div>
+          </div>
+        </motion.div>
+      );
+    }
+
+    // 今日概览页面
+    function TodayOverview({ hotel, theme, pricing, setPricing }) {
+      const competitors = COMPETITORS_DATA[hotel.id] || [];
+      const [basePrice, setBasePrice] = useState(pricing.basePrice);
+      const [recentTransactions, setRecentTransactions] = useState([]);
+
+      // 模拟实时成交
+      useEffect(() => {
+        const interval = setInterval(() => {
+          if (Math.random() > 0.7) {
+            const platforms = ['xianyu', 'xiaohongshu', 'douyin'];
+            const platform = platforms[Math.floor(Math.random() * platforms.length)];
+            const price = Math.round(basePrice * (platform === 'xianyu' ? 1.08 : platform === 'xiaohongshu' ? 1.0 : 0.95));
+            
+            const newTxn = {
+              id: Date.now(),
+              platform,
+              price,
+              roomType: '豪华大床房',
+              time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+            };
+            setRecentTransactions(prev => [newTxn, ...prev].slice(0, 5));
+          }
+        }, 5000);
+        return () => clearInterval(interval);
+      }, [basePrice]);
+
+      const handlePriceChange = (value) => {
+        setBasePrice(value);
+        const competitorAvg = pricing.competitorAvg;
+        let mode = 'dynamic';
+        if (value > competitorAvg * 1.2) mode = 'scalper';
+        else if (value < competitorAvg * 0.9) mode = 'clearance';
+        
+        setPricing({
+          ...pricing,
+          basePrice: value,
+          mode,
+          deviation: ((value - competitorAvg) / competitorAvg * 100).toFixed(1),
+          platformPrices: {
+            xianyu: { price: Math.round(value * 1.08), coefficient: 1.08 },
+            xiaohongshu: { price: Math.round(value * 1.0), coefficient: 1.0 },
+            douyin: { price: Math.round(value * 0.95), coefficient: 0.95 },
+          },
+        });
+      };
+
+      const mode = MODE_CONFIG[pricing.mode];
+
+      return (
+        <div style={{ padding: 24 }}>
+          <h1 style={{ fontSize: 24, marginBottom: 24 }}>今日概览</h1>
+          
+          {/* 预警区 */}
+          <div style={{ 
+            padding: 16, borderRadius: 8, marginBottom: 24,
+            background: 'rgba(255, 184, 0, 0.1)', border: '1px solid var(--neon-amber)'
+          }}>
+            <span style={{ color: 'var(--neon-amber)' }}>🟡 库存紧张：仅剩2间，建议加速出货</span>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 24 }}>
+            {/* 左侧 */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+              {/* 竞品态势 */}
+              <div className="card">
+                <h2 style={{ fontSize: 18, marginBottom: 16 }}>竞品态势</h2>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+                  {competitors.map((comp, idx) => (
+                    <motion.div
+                      key={comp.name}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: idx * 0.1 }}
+                      className="card-hover"
+                      style={{
+                        background: 'var(--bg-tertiary)',
+                        borderRadius: 8,
+                        padding: 16,
+                        border: '1px solid var(--border-color)'
+                      }}
+                    >
+                      <div style={{ fontSize: 14, marginBottom: 8 }}>{comp.brand}</div>
+                      <div style={{ 
+                        fontSize: 24, fontFamily: 'Roboto Mono',
+                        color: comp.status === 'soldout' ? 'var(--neon-red)' : comp.status === 'tight' ? 'var(--neon-amber)' : 'var(--neon-green)'
+                      }}>
+                        {formatPrice(comp.price)}
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 8 }}>
+                        {comp.status === 'soldout' ? '🔴 售罄' : comp.status === 'tight' ? '🟡 紧张' : '🟢 宽裕'} ({comp.inventory}间)
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              </div>
+
+              {/* 双轨定价 */}
+              <div className="card">
+                <h2 style={{ fontSize: 18, marginBottom: 16 }}>双轨定价决策</h2>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+                  <div style={{ background: 'var(--bg-tertiary)', padding: 16, borderRadius: 8 }}>
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>轨道甲：AI计算</div>
+                    <div style={{ fontSize: 20, fontFamily: 'Roboto Mono', color: 'var(--neon-cyan)' }}>
+                      {formatPrice(pricing.basePrice)}
+                    </div>
+                  </div>
+                  <div style={{ background: 'var(--bg-tertiary)', padding: 16, borderRadius: 8 }}>
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>轨道乙：竞品监测</div>
+                    <div style={{ fontSize: 20, fontFamily: 'Roboto Mono', color: 'var(--neon-amber)' }}>
+                      {formatPrice(pricing.competitorAvg)}
+                    </div>
+                  </div>
+                  <div style={{ background: 'var(--bg-tertiary)', padding: 16, borderRadius: 8 }}>
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>融合决策</div>
+                    <div style={{ fontSize: 28, fontFamily: 'Roboto Mono', color: theme.primary }}>
+                      {formatPrice(basePrice)}
+                    </div>
+                    <div style={{ 
+                      display: 'inline-block', marginTop: 8, padding: '4px 8px', borderRadius: 4,
+                      background: `${mode.color}20`, border: `1px solid ${mode.color}`, color: mode.color, fontSize: 12
+                    }}>
+                      {mode.icon} {mode.label}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 价格滑块 */}
+              <div className="card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+                  <span style={{ color: 'var(--text-secondary)' }}>底价红线 {formatPrice(pricing.floorPrice)}</span>
+                  <span style={{ fontSize: 20, fontFamily: 'Roboto Mono', color: theme.primary }}>{formatPrice(basePrice)}</span>
+                  <span style={{ color: 'var(--text-secondary)' }}>天花板 {formatPrice(pricing.ceilingPrice)}</span>
+                </div>
+                <input
+                  type="range"
+                  min={pricing.floorPrice}
+                  max={pricing.ceilingPrice}
+                  value={basePrice}
+                  onChange={(e) => handlePriceChange(Number(e.target.value))}
+                  style={{ width: '100%' }}
+                />
+              </div>
+            </div>
+
+            {/* 右侧 */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+              {/* 分平台定价 */}
+              <div className="card">
+                <h2 style={{ fontSize: 18, marginBottom: 16 }}>分平台定价</h2>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {Object.entries(pricing.platformPrices).map(([platform, data]) => (
+                    <div key={platform} style={{ 
+                      background: 'var(--bg-tertiary)', padding: 16, borderRadius: 8,
+                      border: '1px solid var(--border-color)'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <img src={PLATFORM_LOGOS[platform]} alt={platform} style={{ width: 24, height: 24 }} />
+                        <span style={{ textTransform: 'capitalize' }}>{platform}</span>
+                      </div>
+                      <div style={{ fontSize: 24, fontFamily: 'Roboto Mono' }}>
+                        {formatPrice(data.price)}
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                        系数 ×{data.coefficient}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* 实时成交 */}
+              <div className="card">
+                <h2 style={{ fontSize: 18, marginBottom: 16 }}>实时成交</h2>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <AnimatePresence>
+                    {recentTransactions.map((txn) => (
+                      <motion.div
+                        key={txn.id}
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -20 }}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 8,
+                          padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8
+                        }}
+                      >
+                        <span style={{ color: 'var(--neon-green)' }}>🎉</span>
+                        <span style={{ flex: 1, fontSize: 14 }}>刚刚成交 {txn.roomType}</span>
+                        <span style={{ fontFamily: 'Roboto Mono' }}>{formatPrice(txn.price)}</span>
+                        <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{txn.time}</span>
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                  {recentTransactions.length === 0 && (
+                    <div style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: 32 }}>
+                      等待成交...
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // 主应用
+    function App() {
+      const [currentHotel, setCurrentHotel] = useState(HOTELS_DATA[0]);
+      const [loading, setLoading] = useState(false);
+      const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString('zh-CN', { hour12: false }));
+      const [pricing, setPricing] = useState({
+        basePrice: 580,
+        competitorAvg: 680,
+        floorPrice: 420,
+        ceilingPrice: 800,
+        mode: 'clearance',
+        deviation: -14.7,
+        platformPrices: {
+          xianyu: { price: 626, coefficient: 1.08 },
+          xiaohongshu: { price: 580, coefficient: 1.0 },
+          douyin: { price: 551, coefficient: 0.95 },
+        },
+      });
+
+      const theme = THEME_COLORS[currentHotel.theme];
+
+      // 时间更新
+      useEffect(() => {
+        const timer = setInterval(() => {
+          setCurrentTime(new Date().toLocaleTimeString('zh-CN', { hour12: false }));
+        }, 1000);
+        return () => clearInterval(timer);
+      }, []);
+
+      // 切换酒店
+      const switchHotel = async (hotel) => {
+        setLoading(true);
+        await new Promise(r => setTimeout(r, 500));
+        setCurrentHotel(hotel);
+        
+        // 重置定价数据
+        const competitorAvg = hotel.id === 'sanlitun' ? 680 : hotel.id === 'chongli' ? 500 : 450;
+        setPricing({
+          basePrice: 580,
+          competitorAvg,
+          floorPrice: hotel.roomTypes[0].floorPrice,
+          ceilingPrice: hotel.roomTypes[0].ceilingPrice,
+          mode: hotel.defaultMode,
+          deviation: ((580 - competitorAvg) / competitorAvg * 100).toFixed(1),
+          platformPrices: {
+            xianyu: { price: 626, coefficient: 1.08 },
+            xiaohongshu: { price: 580, coefficient: 1.0 },
+            douyin: { price: 551, coefficient: 0.95 },
+          },
+        });
+        
+        setLoading(false);
+      };
+
+      return (
+        <div style={{ minHeight: '100vh', background: 'var(--bg-primary)' }}>
+          {loading && <LoadingScreen text="正在加载新酒店数据..." theme={theme} />}
+          
+          {/* 顶部栏 */}
+          <header style={{
+            height: 64, background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px'
+          }}>
+            <DomeSeeLogo />
+            
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              {/* 酒店切换 */}
+              <select 
+                value={currentHotel.id}
+                onChange={(e) => switchHotel(HOTELS_DATA.find(h => h.id === e.target.value))}
+                style={{
+                  padding: '8px 16px', background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)',
+                  borderRadius: 8, color: 'white', cursor: 'pointer'
+                }}
+              >
+                {HOTELS_DATA.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
+              </select>
+
+              {/* 定价模式 */}
+              <div style={{
+                padding: '6px 12px', borderRadius: 6,
+                background: `${MODE_CONFIG[pricing.mode].color}20`,
+                border: `1px solid ${MODE_CONFIG[pricing.mode].color}`,
+                color: MODE_CONFIG[pricing.mode].color,
+                fontSize: 14
+              }}>
+                {MODE_CONFIG[pricing.mode].icon} {MODE_CONFIG[pricing.mode].label}
+              </div>
+
+              {/* 时间 */}
+              <div style={{ fontFamily: 'Roboto Mono', fontSize: 20 }} className="neon-cyan">
+                {currentTime}
+              </div>
+            </div>
+          </header>
+
+          {/* 主内容 */}
+          <TodayOverview hotel={currentHotel} theme={theme} pricing={pricing} setPricing={setPricing} />
+
+          {/* 编辑提示 */}
+          <div style={{
+            position: 'fixed', bottom: 20, right: 20,
+            padding: '12px 16px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+            borderRadius: 8, fontSize: 12, color: 'var(--text-secondary)'
+          }}>
+            💡 提示：编辑HTML文件中的 HOTELS_DATA、COMPETITORS_DATA 等数据可自定义演示内容
+          </div>
+        </div>
+      );
+    }
+
+    // 渲染应用
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

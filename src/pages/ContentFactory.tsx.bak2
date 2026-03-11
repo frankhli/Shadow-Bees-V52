@@ -1,0 +1,1596 @@
+/**
+ * Shadow-Bees V52 - 内容工厂页面
+ * 完整功能：AI生成 + 图片管理 + 模板库 + 历史记录 + 发布联动
+ */
+
+import { useState, useRef, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { 
+  Rocket, Wand2, Clock, Image as ImageIcon, History, 
+  LayoutTemplate, Upload, X, Check, Copy, Send, 
+  Eye, Calendar, Sparkles, Trash2, RotateCcw,
+  Flame, Crown, Heart, Mic, TrendingUp
+} from 'lucide-react';
+import { useUnifiedStore } from '@/stores/unifiedStore';
+import { themeColors, modeDetails, platformLogos, calculatePriceRange } from '@/utils/helpers';
+import type { Platform, ContentItem } from '@/types';
+import { useToast } from '@/components/ui/Toast';
+import { LazyImage } from '@/components/ui/LazyImage';
+
+// ============================================
+// 模拟图片库
+// ============================================
+const mockImageLibrary = [
+  { id: 'img1', url: 'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=400', type: 'room', name: '豪华大床房-夜景' },
+  { id: 'img2', url: 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=400', type: 'room', name: '标准双床房-白天' },
+  { id: 'img3', url: 'https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?w=400', type: 'view', name: '窗外景观-城市' },
+  { id: 'img4', url: 'https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?w=400', type: 'facility', name: '酒店大堂' },
+  { id: 'img5', url: 'https://images.unsplash.com/photo-1555854877-bab0e564b8d5?w=400', type: 'room', name: '房间细节-床头' },
+  { id: 'img6', url: 'https://images.unsplash.com/photo-1590490360182-c33d57733427?w=400', type: 'bathroom', name: '浴室-淋浴间' },
+];
+
+// ============================================
+// 深度内容模板库 - 真实种草感场景
+// ============================================
+const contentTemplates = {
+  // 演唱会专题
+  concertTransfer: {
+    name: '演唱会门票转让型',
+    icon: Flame,
+    iconColor: '#FF6B6B',
+    desc: '临时有事去不了，原价转让酒店',
+    platforms: ['xianyu'],
+    scenarios: ['周杰伦演唱会', '林俊杰演唱会', '五月天演唱会', '薛之谦演唱会'],
+    realCases: [
+      {
+        title: '💔含泪转让｜周杰伦演唱会酒店｜离场馆步行5分钟',
+        content: `姐妹们我真的哭死😭😭😭
+好不容易抢到的周杰伦演唱会门票
+结果公司临时安排出差去不了了
+
+🏨 酒店是提前一个月订的
+📍 就在工体旁边，步行5分钟就到
+💰 当时订成¥680，现在¥520转让
+🛏️ 大床房，可以住2人
+
+‼️ 房间真的很抢手
+我当时对比了好几家才选的这家
+性价比真的很高
+
+💔 求有缘姐妹收走
+可以小刀，屠龙刀勿扰
+芝麻信用780+，诚信交易
+
+#周杰伦演唱会 #酒店转让 #北京酒店 #演唱会住宿`,
+        photoTips: '实拍酒店房间图+演唱会门票截图+定位截图',
+        bestTime: '演唱会前3-7天发布',
+        engagement: '咨询量高，需快速响应'
+      },
+      {
+        title: '【已出】原价出林俊杰演唱会酒店｜被朋友鸽了',
+        content: `姐妹们我来更新了，已经出了！感谢小红书！
+
+原帖：
+本来和闺蜜约好一起看林俊杰演唱会的
+结果她被男朋友叫去约会了😅
+
+📍 国家体育场附近酒店
+🚇 地铁直达，看完演唱会不用打车
+💰 原价¥580出，不赚差价
+
+房间细节：
+✅ 独立卫浴，24h热水
+✅ 有窗户，通风好
+✅ 楼下就是便利店
+
+本人芝麻信用极好
+可以走平台，双方都有保障
+
+#林俊杰演唱会 #酒店转让 #演唱会搭子`,
+        photoTips: '聊天记录截图+酒店实拍+地铁线路图',
+        bestTime: '被鸽后当天发布',
+        engagement: '共鸣感强，容易获得同情和信任'
+      }
+    ]
+  },
+  
+  // 攻略种草型
+  xhsGuide: {
+    name: '小红书攻略型',
+    icon: Crown,
+    iconColor: '#FFD93D',
+    desc: '真实体验分享，种草感强的攻略笔记',
+    platforms: ['xiaohongshu'],
+    scenarios: ['首次打卡', '避坑指南', '性价比推荐'],
+    realCases: [
+      {
+        title: '北京工体附近住宿｜人均200+｜看演唱会必住',
+        content: `姐妹们！发现一家宝藏酒店！
+上周去看演唱会住这里，真的太香了！
+
+📍 位置：工体步行8分钟
+看完演唱会不用排队打车
+走回去还能买点宵夜
+
+💰 价格：我们两人住，人均¥200+
+对比附近的亚朵、全季便宜一半！
+
+🏨 房间环境：
+✨ 装修很新，拍照超出片
+🛏️ 床品很干净，睡得超舒服
+🚿 水压够大，洗头很方便
+🔇 隔音不错，不会被吵醒
+
+⚠️ 小缺点：
+房间稍微有点小
+但是200+的价格真的不能要求更多
+
+🍜 周边：
+楼下就有便利店
+步行5分钟有很多吃的
+看完演唱会不怕饿肚子
+
+💡 Tips：
+演唱会期间房源紧张
+建议提前1-2周订
+
+姐妹们还有什么问题可以问我～
+
+#北京酒店 #工体演唱会 #住宿推荐 #性价比酒店 #演唱会攻略`,
+        photoTips: '房间细节图+窗外夜景+浴室+床品特写',
+        bestTime: '工作日晚8-10点发布',
+        engagement: '互动率高，评论区多询问细节'
+      },
+      {
+        title: '避雷❗️工体附近酒店真实测评｜别被照片骗了',
+        content: `之前被坑过一次
+这次特意住了3家对比
+给大家做个真实测评
+
+🚫 第一家（名字不提了）：
+照片看着很高级
+实际房间又小又旧
+窗户对着墙壁，闷死了
+价格还要¥600+
+
+✅ 第二家（推荐）：
+就是我现在住的这家
+虽然装修一般，但胜在干净
+最重要的是位置好！
+步行到工体真的只要5分钟
+价格¥400+，性价比可以
+
+⚠️ 第三家（中规中矩）：
+连锁酒店，标准配置
+没有惊喜也没有失望
+价格¥500左右
+适合对住宿要求不高的
+
+💡 总结：
+看演唱会住宿，位置>环境
+走得近真的能省很多麻烦
+
+#酒店测评 #北京住宿 #避坑指南 #真实分享`,
+        photoTips: '对比图+房间实拍+窗外景色+步行路线截图',
+        bestTime: '周末下午发布',
+        engagement: '避雷类内容容易引起共鸣和传播'
+      }
+    ]
+  },
+  
+  // 情侣约会型
+  coupleStay: {
+    name: '情侣约会氛围型',
+    icon: Heart,
+    iconColor: '#FF8FB1',
+    desc: '浪漫约会、纪念日、周末 getaway',
+    platforms: ['xiaohongshu', 'wechat'],
+    scenarios: ['周年纪念', '周末约会', '求婚布置'],
+    realCases: [
+      {
+        title: '和男朋友住到了人生酒店💕｜北京约会好去处',
+        content: `姐妹们！这家酒店真的太适合约会了！
+上周末和男朋友纪念日住这里
+体验感满分💯
+
+🌃 夜景绝美
+房间窗户正对CBD
+晚上看夜景超级浪漫
+男朋友都说选得好
+
+🛁 浴室氛围感
+有大浴缸，酒店提供浴盐
+两个人泡澡聊天超惬意
+（记得带一次性浴缸套）
+
+🛏️ 床品很舒服
+早上都不想起床
+赖到中午才退房
+
+🍷 我们还自己带了红酒
+坐在窗边小酌
+仪式感拉满～
+
+💰 价格：¥580/晚
+对于约会来说性价比很高
+毕竟体验感太重要了
+
+#情侣酒店 #约会好去处 #北京约会 #纪念日 #浪漫酒店',
+        photoTips: '夜景照片+浴缸氛围照+红酒+情侣背影',
+        bestTime: '周四晚或周五下午发布',
+        engagement: '收藏率高，女性用户转化好'
+      }
+    ]
+  },
+  
+  // 微信短视频型
+  wechatViral: {
+    name: '微信爆款短视频型',
+    icon: Mic,
+    iconColor: '#A855F7',
+    desc: '快节奏、强视觉冲击、爆款BGM',
+    platforms: ['wechat'],
+    scenarios: ['房间变装', '价格震撼', '场景对比'],
+    realCases: [
+      {
+        title: '💥工体旁¥300的酒店长什么样？',
+        content: `[视频脚本]
+
+0-3秒: 大字快闪
+"工体旁¥300的酒店"
+"真实开箱！"
+
+3-8秒: 快速剪辑
+推门 → 开灯 → 全景
+字幕:"进门第一眼"
+
+8-15秒: 细节展示
+床上 → 浴室 → 窗户
+字幕:"床品/浴室/窗外"
+
+15-20秒: 价格对比
+左边: 附近亚朵¥800+
+右边: 这家¥300+
+字幕:"省下的钱吃顿大餐不香吗"
+
+20-25秒: 结尾
+主播出镜: "位置真的绝了，步行5分钟到工体"
+"演唱会住宿首选"
+
+[文案]
+姐妹们！挖到宝了！
+工体旁¥300的酒店居然长这样！
+
+看完演唱会不用排队打车
+步行5分钟就到
+省下的钱买周边不香吗😍
+
+📍 三里屯附近
+💰 ¥300+/晚
+🛏️ 性价比拉满
+
+#演唱会住宿 #北京酒店 #工体 #性价比酒店 #酒店开箱`,
+        photoTips: '15秒快节奏剪辑，每个镜头2-3秒',
+        bestTime: '晚7-9点发布',
+        engagement: '完播率高，适合投DOU+'
+      },
+      {
+        title: '🎵演唱会散场后的真实体验｜住得近有多爽',
+        content: `[视频脚本]
+
+0-5秒: 演唱会散场画面（素材）
+字幕: "散场后2万人的地铁站"
+
+5-10秒: 打车软件截图
+排队200+人，预计等待1小时
+字幕: "打不到车..."
+
+10-18秒: 走路回酒店
+一路上还在回味演唱会
+字幕: "而我选择走回去"
+
+18-25秒: 到酒店
+轻松洗漱，躺在床上
+字幕: "15分钟后已经在床上"
+"这就是住得近的快乐"
+
+[文案]
+看完演唱会最痛苦的是什么？
+是散场后打不到车😭
+
+上次住得近真的太爽了
+散场后慢慢走回酒店
+还能在路上回味
+
+强烈建议姐妹们
+看演唱会一定要住得近！
+
+#演唱会攻略 #工体演唱会 #住宿推荐 #演唱会经验', 
+        photoTips: '对比剪辑，散场人流vs步行回酒店',
+        bestTime: '演唱会后当晚发布',
+        engagement: '时效性强，演唱会期间爆款'
+      }
+    ]
+  },
+  
+  // 闲鱼性价比型
+  xianyuDeal: {
+    name: '闲鱼捡漏型',
+    icon: Flame,
+    iconColor: '#FF9500',
+    desc: '急出、可刀、包邮等促销话术',
+    platforms: ['xianyu'],
+    scenarios: ['急出回血', '订多了转让', '行程变更'],
+    realCases: [
+      {
+        title: '【急出】演唱会酒店｜原价¥680现¥450｜可小刀',
+        content: `急出！急出！急出！
+
+本来约好和朋友一起看演唱会的
+结果她临时有事去不了
+一个人住太浪费了
+
+📍 位置：工体旁边，步行3分钟
+📅 日期：本周六晚
+💰 价格：¥450（原价¥680）
+可小刀，别太离谱就行
+
+房间情况：
+✅ 大床房，可以住2人
+✅ 独立卫浴，有窗户
+✅ 已付定金，可以直接改入住人
+
+🎁 Bonus：
+我买了演唱会周边小礼品
+成交的话一起送你
+
+⚠️ 诚信交易
+芝麻信用极好
+可走平台，双方都安心
+
+有意直接私聊
+看到就回
+
+#演唱会酒店 #急出 #北京住宿 #转让`,
+        photoTips: '订单截图+房间实拍+周边礼品',
+        bestTime: '随时发布，尽快处理',
+        engagement: '价格敏感用户，议价较多'
+      },
+      {
+        title: '【订多了】演唱会期间酒店转让｜可住2-3人',
+        content: `姐妹们我真的手滑了😅
+帮朋友订酒店，结果订多了
+现在多出一间房
+
+📍 三里屯附近，离工体超近
+📅 2月14日-15日（情人节当晚）
+🛏️ 双床房，可以住2-3人
+💰 ¥520出（我订成¥580）
+
+为什么选这家：
+✅ 对比了好几家才选的
+✅ 评价很好，4.9分
+✅ 干净卫生，有实拍图
+✅ 可以延迟到2点退房
+
+适合：
+👭 闺蜜出行
+👫 情侣约会
+🎤 看演唱会
+
+⚠️ 说明：
+因为是多订的
+所以只能改入住人信息
+不能取消
+
+感兴趣的姐妹私信我
+可以发更多实拍图
+
+#酒店转让 #情人节 #演唱会住宿 #三里屯`,
+        photoTips: '订单详情+房间实拍图+地图定位',
+        bestTime: '发现订多后立即发布',
+        engagement: '信任感建立很重要，多发实拍'
+      }
+    ]
+  },
+  
+  // 商务出差型
+  businessTrip: {
+    name: '商务出差实用型',
+    icon: Crown,
+    iconColor: '#5856D6',
+    desc: '交通便利、发票报销、舒适办公',
+    platforms: ['xiaohongshu', 'xianyu'],
+    scenarios: ['出差报销', '会议住宿', '长期包房'],
+    realCases: [
+      {
+        title: '北京出差住宿｜可开票｜离客户公司10分钟',
+        content: `经常来北京出差
+住过N家酒店后
+这家成为了我的首选
+
+📍 位置：CBD核心区
+🚗 交通：离客户公司打车10分钟
+🚇 地铁：1号线/10号线交汇
+
+💼 商务需求：
+✅ 可开专票，公司报销没问题
+✅ 有办公桌，晚上还能处理邮件
+✅ 隔音好，早上不会被吵醒
+✅ 早餐6:30开始，适合早起赶会
+
+💰 协议价：¥450/晚
+比携程便宜100+
+长期住可以谈更优惠
+
+🍜 周边：
+楼下就是便利店
+步行5分钟有很多餐厅
+应付客户很方便
+
+需要长期合作的可以私信
+我可以推荐销售微信
+
+#商务出差 #北京酒店 #出差住宿 #可开票',
+        photoTips: '办公桌+早餐+发票+地理位置',
+        bestTime: '工作日下午发布',
+        engagement: 'B端用户，复购率高'
+      }
+    ]
+  }
+};
+
+// 模板使用指南
+const templateGuide = {
+  title: '如何选择合适的模板？',
+  tips: [
+    { scenario: '演唱会门票已买，临时去不了', template: 'concertTransfer', reason: '真实转让场景，可信度高' },
+    { scenario: '想吸引自然流量', template: 'xhsGuide', reason: '攻略型内容搜索权重高' },
+    { scenario: '情侣/女性用户', template: 'coupleStay', reason: '氛围感强，转化率高' },
+    { scenario: '追求爆款曝光', template: 'wechatViral', reason: '短视频传播力强' },
+    { scenario: '快速出清库存', template: 'xianyuDeal', reason: '闲鱼用户价格敏感，成交快' },
+    { scenario: '企业客户/B端', template: 'businessTrip', reason: '专业性强，客单价高' },
+  ]
+};
+
+// ============================================
+// 历史生成记录（本地存储）
+// ============================================
+type GeneratedContent = {
+  id: string;
+  platform: Platform;
+  template: string;
+  title: string;
+  content: string;
+  images: string[];
+  generatedAt: string;
+  status: 'draft' | 'published' | 'expired';
+  performance?: {
+    impressions: number;
+    clicks: number;
+    conversions: number;
+  };
+};
+
+// ============================================
+// 主组件
+// ============================================
+export default function ContentFactory() {
+  const { 
+    currentTheme, 
+    currentHotel, 
+    pricing, 
+    currentMode,
+    currentRoomType,
+    addContent
+  } = useUnifiedStore();
+  
+  // UI状态
+  const [selectedPlatform, setSelectedPlatform] = useState<Platform>('xianyu');
+  const [selectedTemplate, setSelectedTemplate] = useState<string>('concertTransfer');
+  const [selectedImages, setSelectedImages] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<'generate' | 'library' | 'history'>('generate');
+  
+  // 用户上传的本地图片
+  const [uploadedImages, setUploadedImages] = useState<{ id: string; url: string; name: string }[]>([]);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [countdown, setCountdown] = useState(0);
+  const [showImageLibrary, setShowImageLibrary] = useState(false);
+  const [generatedContent, setGeneratedContent] = useState<GeneratedContent | null>(null);
+  const [contentHistory, setContentHistory] = useState<GeneratedContent[]>([]);
+  const [copySuccess, setCopySuccess] = useState(false);
+  
+  void themeColors[currentTheme];
+  const mode = modeDetails[currentMode];
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 从localStorage加载历史记录
+  useEffect(() => {
+    const saved = localStorage.getItem('content-history');
+    if (saved) {
+      setContentHistory(JSON.parse(saved));
+    }
+  }, []);
+
+  // 保存历史记录到localStorage
+  useEffect(() => {
+    localStorage.setItem('content-history', JSON.stringify(contentHistory));
+  }, [contentHistory]);
+
+  // Toast 提示
+  const toast = useToast();
+
+  // 生成内容 - 使用真实模板案例
+  const generateContent = async () => {
+    if (selectedImages.length === 0) {
+      toast.warning('请至少选择一张图片');
+      return;
+    }
+    
+    setIsGenerating(true);
+    
+    // 模拟AI生成耗时
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    
+    const platformPrices = {
+      xianyu: pricing?.platformPrices?.xianyu?.price || 626,
+      xiaohongshu: pricing?.platformPrices?.xiaohongshu?.price || 580,
+      wechat: pricing?.platformPrices?.wechat?.price || 551,
+    };
+    
+    const basePrice = pricing?.basePrice || 580;
+    const competitorAvg = pricing?.competitorAvg || 680;
+    
+    // 获取当前选中的模板
+    const template = contentTemplates[selectedTemplate as keyof typeof contentTemplates];
+    
+    // 从模板的真实案例中随机选择一个
+    let title = '';
+    let content = '';
+    
+    if (template?.realCases && template.realCases.length > 0) {
+      // 随机选择一个案例
+      const randomCase = template.realCases[Math.floor(Math.random() * template.realCases.length)];
+      
+      // 替换案例中的变量
+      title = randomCase.title
+        .replace(/¥\d+/g, `¥${platformPrices[selectedPlatform]}`)
+        .replace(/原价¥\d+/g, `原价¥${Math.round(basePrice * 1.2)}`)
+        .replace(/现¥\d+/g, `现¥${platformPrices[selectedPlatform]}`);
+      
+      content = randomCase.content
+        .replace(/当前酒店\.name/g, currentHotel.name)
+        .replace(/currentRoomType\?\.name/g, currentRoomType?.name || '豪华房')
+        .replace(/¥\{platformPrices\[selectedPlatform\]\}/g, `¥${platformPrices[selectedPlatform]}`)
+        .replace(/¥\{pricing\?\.basePrice\}/g, `¥${basePrice}`)
+        .replace(/¥\{pricing\?\.competitorAvg\}/g, `¥${competitorAvg}`)
+        .replace(/¥\{Math\.round\(basePrice \* 1\.2\)\}/g, `¥${Math.round(basePrice * 1.2)}`)
+        .replace(/¥\{Math\.round\(competitorAvg - platformPrices\[selectedPlatform\]\)\}/g, `¥${Math.round(competitorAvg - platformPrices[selectedPlatform])}`);
+      
+      // 如果内容里有未替换的变量，再统一处理一下
+      content = content
+        .replace(new RegExp(currentHotel.name, 'g'), currentHotel.name)
+        .replace(/\$\{currentHotel\.name\}/g, currentHotel.name);
+    } else {
+      // 备用生成逻辑
+      title = `【推荐】${currentHotel.name}｜${currentRoomType?.name || '优质房源'}｜演唱会住宿首选`;
+      content = `📍位置：${currentHotel.name}，距演唱会场馆超近
+💰价格：¥${platformPrices[selectedPlatform]}/晚
+🏨房型：${currentRoomType?.name || '豪华房'}
+✨特色：位置优越，出行便利
+
+#演唱会住宿 #北京酒店 #酒店推荐`;
+    }
+    
+    const newContent: GeneratedContent = {
+      id: `content-${Date.now()}`,
+      platform: selectedPlatform,
+      template: selectedTemplate,
+      title,
+      content,
+      images: selectedImages,
+      generatedAt: new Date().toISOString(),
+      status: 'draft',
+    };
+    
+    setGeneratedContent(newContent);
+    setContentHistory(prev => [newContent, ...prev]);
+    setIsGenerating(false);
+    
+    // 启动15分钟库存倒计时
+    setCountdown(15 * 60);
+    const timer = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  // 发布内容
+  const publishContent = () => {
+    if (!generatedContent) return;
+    
+    // 更新状态为已发布
+    const publishedContent = { ...generatedContent, status: 'published' as const };
+    setGeneratedContent(publishedContent);
+    setContentHistory(prev => 
+      prev.map(c => c.id === generatedContent.id ? publishedContent : c)
+    );
+    
+    // 添加到发布状态
+    const contentItem: ContentItem = {
+      id: generatedContent.id,
+      platform: generatedContent.platform,
+      title: generatedContent.title,
+      content: generatedContent.content,
+      price: pricing?.platformPrices?.[generatedContent.platform]?.price || 580,
+      status: 'published',
+      performance: {
+        impressions: 0,
+        clicks: 0,
+        inquiries: 0,
+        conversions: 0,
+      },
+      createdAt: new Date().toISOString(),
+    };
+    
+    addContent(contentItem);
+    toast.success('发布成功', '可在"发布状态"页面查看');
+  };
+
+  // 复制内容
+  const copyContent = () => {
+    if (!generatedContent) return;
+    navigator.clipboard.writeText(`${generatedContent.title}\n\n${generatedContent.content}`);
+    setCopySuccess(true);
+    setTimeout(() => setCopySuccess(false), 2000);
+  };
+
+  // 删除历史记录
+  const deleteHistory = (id: string) => {
+    setContentHistory(prev => prev.filter(c => c.id !== id));
+  };
+
+  // 重新加载历史内容
+  const loadHistory = (content: GeneratedContent) => {
+    setGeneratedContent(content);
+    setSelectedPlatform(content.platform);
+    setSelectedTemplate(content.template);
+    setSelectedImages(content.images);
+    setActiveTab('generate');
+  };
+
+  // 格式化倒计时
+  const formatCountdown = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // 格式化时间
+  const formatTime = (iso: string) => {
+    return new Date(iso).toLocaleString('zh-CN', { 
+      month: 'short', 
+      day: 'numeric', 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+  };
+
+  // 计算统计数据
+  const stats = useMemo(() => {
+    const totalContents = contentHistory.length;
+    const publishedContents = contentHistory.filter(c => c.status === 'published').length;
+    const totalImpressions = contentHistory.reduce((sum, c) => sum + (c.performance?.impressions || 0), 0);
+    const totalConversions = contentHistory.reduce((sum, c) => sum + (c.performance?.conversions || 0), 0);
+    const conversionRate = totalImpressions > 0 ? Math.round((totalConversions / totalImpressions) * 100) : 0;
+    
+    return {
+      totalContents,
+      publishedContents,
+      totalImpressions,
+      totalConversions,
+      conversionRate,
+    };
+  }, [contentHistory]);
+
+  return (
+    <div className="space-y-6">
+      {/* 页面标题 + 统计卡片 + Tab切换 */}
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold">内容工厂</h1>
+            <span className="px-2 py-0.5 rounded text-xs bg-neon-cyan/10 text-neon-cyan border border-neon-cyan/30">
+              {mode.label}
+            </span>
+          </div>
+          <p className="text-sm text-text-secondary mt-1">AI生成多平台差异化内容</p>
+        </div>
+        
+        <div className="flex items-center gap-2 bg-bg-secondary rounded-xl p-1 border border-border-color">
+          {[
+            { key: 'generate', icon: Sparkles, label: '生成内容' },
+            { key: 'library', icon: LayoutTemplate, label: '模板库' },
+            { key: 'history', icon: History, label: '历史记录', badge: contentHistory.length },
+          ].map((tab) => {
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key as any)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-all ${
+                  activeTab === tab.key
+                    ? 'bg-neon-cyan/20 text-neon-cyan'
+                    : 'text-text-secondary hover:text-white'
+                }`}
+              >
+                <Icon size={16} />
+                <span>{tab.label}</span>
+                {tab.badge ? (
+                  <span className="px-1.5 py-0.5 bg-neon-cyan/30 rounded text-xs">{tab.badge}</span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 关键指标统计卡片 */}
+      <div className="grid grid-cols-4 gap-4">
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-bg-secondary rounded-xl p-4 border border-border-color"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-text-secondary">生成内容</span>
+            <div className="w-8 h-8 rounded-lg bg-neon-cyan/10 flex items-center justify-center">
+              <Rocket size={16} className="text-neon-cyan" />
+            </div>
+          </div>
+          <div className="text-2xl font-bold text-neon-cyan">{stats.totalContents}</div>
+          <div className="text-xs text-text-secondary mt-1">已发布 {stats.publishedContents}</div>
+        </motion.div>
+        
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.05 }}
+          className="bg-bg-secondary rounded-xl p-4 border border-border-color"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-text-secondary">总曝光</span>
+            <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center">
+              <Eye size={16} className="text-purple-400" />
+            </div>
+          </div>
+          <div className="text-2xl font-bold text-purple-400">{stats.totalImpressions.toLocaleString()}</div>
+          <div className="text-xs text-text-secondary mt-1">累计浏览量</div>
+        </motion.div>
+        
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="bg-bg-secondary rounded-xl p-4 border border-border-color"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-text-secondary">成交转化</span>
+            <div className="w-8 h-8 rounded-lg bg-neon-green/10 flex items-center justify-center">
+              <TrendingUp size={16} className="text-neon-green" />
+            </div>
+          </div>
+          <div className="text-2xl font-bold text-neon-green">{stats.totalConversions}</div>
+          <div className="text-xs text-text-secondary mt-1">转化率 {stats.conversionRate}%</div>
+        </motion.div>
+        
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.15 }}
+          className="bg-bg-secondary rounded-xl p-4 border border-border-color"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-text-secondary">当前模式</span>
+            <div className="w-8 h-8 rounded-lg bg-neon-amber/10 flex items-center justify-center">
+              <mode.icon size={16} style={{ color: mode.color }} />
+            </div>
+          </div>
+          <div className="text-lg font-bold" style={{ color: mode.color }}>{mode.label}</div>
+          <div className="text-xs text-text-secondary mt-1">{mode.description}</div>
+        </motion.div>
+      </div>
+
+      {/* 生成内容 Tab */}
+      {activeTab === 'generate' && (
+        <div className="grid grid-cols-12 gap-6">
+          {/* 左侧：配置面板 */}
+          <div className="col-span-4 space-y-6">
+            {/* 市场态势 */}
+            <div className="bg-bg-secondary rounded-xl border border-border-color p-5">
+              <h3 className="font-medium mb-3 flex items-center gap-2">
+                <Eye size={16} className="text-neon-cyan" />
+                当前市场态势
+              </h3>
+              <div className="flex items-center gap-2 mb-3">
+                <mode.icon size={24} style={{ color: mode.color }} />
+                <div>
+                  <div className="font-medium" style={{ color: mode.color }}>{mode.label}</div>
+                  <div className="text-xs text-text-secondary">{mode.description}</div>
+                </div>
+              </div>
+              <div className="text-xs text-text-secondary">
+                让价空间: <span className="text-neon-cyan">{calculatePriceRange(currentMode).label}</span>
+              </div>
+            </div>
+
+            {/* 平台选择 */}
+            <div className="bg-bg-secondary rounded-xl border border-border-color p-5">
+              <h3 className="font-medium mb-3">选择发布平台</h3>
+              <div className="space-y-2">
+                {(['xianyu', 'xiaohongshu', 'wechat'] as Platform[]).map((platform) => {
+                  const info = platformLogos[platform];
+                  return (
+                    <button
+                      key={platform}
+                      onClick={() => setSelectedPlatform(platform)}
+                      className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-all ${
+                        selectedPlatform === platform
+                          ? 'border-neon-cyan bg-neon-cyan/10'
+                          : 'border-border-color hover:border-neon-cyan/50'
+                      }`}
+                    >
+                      <img 
+                        src={info.logo}
+                        alt={info.name}
+                        className="w-10 h-10 rounded-lg object-contain"
+                      />
+                      <div className="flex-1 text-left">
+                        <div className="font-medium">{info.name}</div>
+                        <div className="text-xs text-text-secondary">
+                          系数×{info.coefficient}
+                        </div>
+                      </div>
+                      {selectedPlatform === platform && (
+                        <Check size={16} className="text-neon-cyan" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 模板选择 */}
+            <div className="bg-bg-secondary rounded-xl border border-border-color p-5">
+              <h3 className="font-medium mb-3 flex items-center gap-2">
+                <LayoutTemplate size={16} />
+                选择内容模板
+              </h3>
+              <div className="grid grid-cols-2 gap-2">
+                {Object.entries(contentTemplates).map(([key, template]) => {
+                  const Icon = template.icon;
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => setSelectedTemplate(key)}
+                      className={`p-3 rounded-lg border text-left transition-all ${
+                        selectedTemplate === key
+                          ? 'border-neon-purple bg-neon-purple/10'
+                          : 'border-border-color hover:border-neon-purple/50'
+                      }`}
+                    >
+                      <div className="mb-2">
+                        <Icon 
+                          size={24} 
+                          style={{ color: template.iconColor }}
+                          strokeWidth={2}
+                        />
+                      </div>
+                      <div className="font-medium text-sm">{template.name}</div>
+                      <div className="text-xs text-text-secondary">{template.desc}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 图片选择 */}
+            <div className="bg-bg-secondary rounded-xl border border-border-color p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-medium flex items-center gap-2">
+                  <ImageIcon size={16} />
+                  选择图片 ({selectedImages.length}/9)
+                </h3>
+                <button
+                  onClick={() => setShowImageLibrary(true)}
+                  className="text-xs text-neon-cyan hover:underline"
+                >
+                  从图库选择
+                </button>
+              </div>
+              
+              {/* 已选图片预览 */}
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {selectedImages.map((imgId) => {
+                  // 优先从上传的图片查找，再从图库查找
+                  const img = uploadedImages.find(i => i.id === imgId) || mockImageLibrary.find(i => i.id === imgId);
+                  return (
+                    <div key={imgId} className="relative aspect-square rounded-lg overflow-hidden">
+                      <LazyImage src={img?.url || ''} alt={img?.name || ''} className="w-full h-full" />
+                      <button
+                        onClick={() => setSelectedImages(prev => prev.filter(id => id !== imgId))}
+                        className="absolute top-1 right-1 w-5 h-5 bg-neon-red rounded-full flex items-center justify-center"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  );
+                })}
+                {selectedImages.length < 9 && (
+                  <button
+                    onClick={() => setShowImageLibrary(true)}
+                    className="aspect-square rounded-lg border-2 border-dashed border-border-color flex flex-col items-center justify-center text-text-secondary hover:border-neon-cyan hover:text-neon-cyan transition-all"
+                  >
+                    <Upload size={20} />
+                    <span className="text-xs mt-1">添加</span>
+                  </button>
+                )}
+              </div>
+              
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  // 本地图片上传
+                  const files = Array.from(e.target.files || []);
+                  if (files.length === 0) return;
+                  
+                  const newImages: { id: string; url: string; name: string }[] = [];
+                  let processed = 0;
+                  
+                  files.forEach((file) => {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                      const dataUrl = event.target?.result as string;
+                      const newImg = {
+                        id: `upload-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                        url: dataUrl,
+                        name: file.name,
+                      };
+                      newImages.push(newImg);
+                      processed++;
+                      
+                      if (processed === files.length) {
+                        setUploadedImages(prev => [...prev, ...newImages]);
+                        setSelectedImages(prev => [...prev, ...newImages.map(img => img.id)]);
+                      }
+                    };
+                    reader.readAsDataURL(file);
+                  });
+                }}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full py-2 border border-dashed border-border-color rounded-lg text-sm text-text-secondary hover:border-neon-cyan hover:text-neon-cyan transition-all"
+              >
+                + 上传本地图片
+              </button>
+            </div>
+
+            {/* 生成按钮 */}
+            <button
+              onClick={generateContent}
+              disabled={isGenerating || selectedImages.length === 0}
+              className="w-full py-4 bg-gradient-to-r from-neon-cyan to-blue-500 rounded-xl font-semibold text-bg-primary flex items-center justify-center gap-3 disabled:opacity-50 transition-all hover:shadow-lg hover:shadow-neon-cyan/30"
+            >
+              {isGenerating ? (
+                <>
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                    className="w-5 h-5 border-2 border-bg-primary border-t-transparent rounded-full"
+                  />
+                  AI生成中...
+                </>
+              ) : (
+                <>
+                  <Wand2 size={20} />
+                  一键生成内容
+                </>
+              )}
+            </button>
+
+            {/* 库存预占提示 */}
+            {countdown > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-4 bg-neon-amber/10 border border-neon-amber rounded-lg"
+              >
+                <div className="flex items-center gap-2 text-neon-amber mb-1">
+                  <Clock size={16} />
+                  <span className="font-medium">库存已预占</span>
+                </div>
+                <p className="text-sm text-text-secondary">
+                  已预占1间{currentRoomType?.name}，{formatCountdown(countdown)}后自动释放
+                </p>
+              </motion.div>
+            )}
+          </div>
+
+          {/* 右侧：内容预览 */}
+          <div className="col-span-8">
+            <div className="bg-bg-secondary rounded-xl border border-border-color p-6 h-full">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="font-medium">内容预览</h3>
+                {generatedContent && (
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2 py-1 rounded text-xs ${
+                      generatedContent.status === 'published' 
+                        ? 'bg-neon-green/20 text-neon-green'
+                        : 'bg-neon-amber/20 text-neon-amber'
+                    }`}>
+                      {generatedContent.status === 'published' ? '已发布' : '草稿'}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {generatedContent ? (
+                <div className="space-y-6">
+                  {/* 图片预览 */}
+                  {generatedContent.images.length > 0 && (
+                    <div className="grid grid-cols-4 gap-3">
+                      {generatedContent.images.map((imgId) => {
+                        const img = uploadedImages.find(i => i.id === imgId) || mockImageLibrary.find(i => i.id === imgId);
+                        return (
+                          <div key={imgId} className="aspect-square rounded-lg overflow-hidden">
+                            <LazyImage src={img?.url || ''} alt={img?.name || ''} className="w-full h-full" />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* 平台样式预览 */}
+                  <div className="rounded-xl overflow-hidden shadow-2xl">
+                    {selectedPlatform === 'xianyu' && (
+                      <div className="bg-[#F6F7F9] text-gray-900 max-w-md mx-auto">
+                        {/* 闲鱼顶部导航 */}
+                        <div className="bg-white px-4 py-3 flex items-center gap-3 border-b border-gray-100">
+                          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center text-white text-xs font-bold">卖家</div>
+                          <div className="flex-1">
+                            <div className="text-sm font-medium">酒店小助手</div>
+                            <div className="text-xs text-gray-400">信用极好 | IP属地：北京</div>
+                          </div>
+                          <button className="px-3 py-1 border border-red-500 text-red-500 rounded-full text-xs">关注</button>
+                        </div>
+                        
+                        {/* 闲鱼图片区域 - 横向滚动 */}
+                        <div className="bg-white">
+                          <div className="flex overflow-x-auto snap-x snap-mandatory" style={{ scrollbarWidth: 'none' }}>
+                            {generatedContent.images.length > 0 ? generatedContent.images.map((imgId, idx) => {
+                              const img = uploadedImages.find(i => i.id === imgId) || mockImageLibrary.find(i => i.id === imgId);
+                              return (
+                                <div key={idx} className="flex-shrink-0 w-full snap-center aspect-square bg-gray-100">
+                                  <img src={img?.url || ''} alt="" className="w-full h-full object-cover" />
+                                </div>
+                              );
+                            }) : (
+                              <div className="w-full aspect-square bg-gray-100 flex items-center justify-center text-gray-400">暂无图片</div>
+                            )}
+                          </div>
+                          {/* 图片指示器 */}
+                          {generatedContent.images.length > 1 && (
+                            <div className="flex justify-center gap-1 py-2">
+                              {generatedContent.images.map((_, idx) => (
+                                <div key={idx} className={`w-1.5 h-1.5 rounded-full ${idx === 0 ? 'bg-gray-800' : 'bg-gray-300'}`} />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* 闲鱼价格区域 */}
+                        <div className="bg-white px-4 py-3 border-b border-gray-100">
+                          <div className="flex items-baseline gap-2">
+                            <span className="text-2xl font-bold text-red-600">
+                              <span className="text-sm">¥</span>{pricing?.platformPrices?.[selectedPlatform]?.price || 626}
+                            </span>
+                            <span className="text-sm text-gray-400 line-through">¥{Math.round((pricing?.basePrice || 580) * 1.2)}</span>
+                            <span className="ml-auto px-2 py-0.5 bg-red-50 text-red-600 text-xs rounded">包邮</span>
+                          </div>
+                        </div>
+                        
+                        {/* 闲鱼标题和内容 */}
+                        <div className="bg-white px-4 py-3 border-b border-gray-100">
+                          <h4 className="font-medium text-base leading-relaxed mb-2">{generatedContent.title}</h4>
+                          <div className="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap">{generatedContent.content}</div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <span className="px-2 py-0.5 bg-gray-100 text-gray-500 text-xs rounded">#演唱会住宿</span>
+                            <span className="px-2 py-0.5 bg-gray-100 text-gray-500 text-xs rounded">#北京酒店</span>
+                            <span className="px-2 py-0.5 bg-gray-100 text-gray-500 text-xs rounded">#急出</span>
+                          </div>
+                        </div>
+                        
+                        {/* 闲鱼底部操作栏 */}
+                        <div className="bg-white px-4 py-3 flex items-center gap-4">
+                          <div className="flex items-center gap-1 text-gray-400">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
+                            <span className="text-xs">收藏</span>
+                          </div>
+                          <div className="flex-1" />
+                          <button className="px-6 py-2 bg-gradient-to-r from-yellow-400 to-orange-500 text-white rounded-full font-medium text-sm">
+                            我想要
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {selectedPlatform === 'xiaohongshu' && (
+                      <div className="bg-white text-gray-900 max-w-md mx-auto">
+                        {/* 小红书顶部 */}
+                        <div className="px-4 py-3 flex items-center gap-3 border-b border-gray-50">
+                          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-pink-400 to-red-500 flex items-center justify-center text-white text-xs font-bold">酒店</div>
+                          <div className="flex-1">
+                            <div className="text-sm font-medium">{currentHotel.name}</div>
+                            <div className="text-xs text-gray-400">北京 · 酒店民宿</div>
+                          </div>
+                          <button className="px-4 py-1.5 bg-red-500 text-white rounded-full text-xs font-medium">关注</button>
+                        </div>
+                        
+                        {/* 小红书图片 - 横向滑动 */}
+                        <div className="flex overflow-x-auto snap-x snap-mandatory" style={{ scrollbarWidth: 'none' }}>
+                          {generatedContent.images.length > 0 ? generatedContent.images.map((imgId, idx) => {
+                            const img = uploadedImages.find(i => i.id === imgId) || mockImageLibrary.find(i => i.id === imgId);
+                            return (
+                              <div key={idx} className="flex-shrink-0 w-full snap-center aspect-[3/4] bg-gray-100">
+                                <img src={img?.url || ''} alt="" className="w-full h-full object-cover" />
+                              </div>
+                            );
+                          }) : (
+                            <div className="w-full aspect-[3/4] bg-gray-100 flex items-center justify-center text-gray-400">暂无图片</div>
+                          )}
+                        </div>
+                        
+                        {/* 小红书互动栏 */}
+                        <div className="px-4 py-3 flex items-center gap-6 border-b border-gray-50">
+                          <div className="flex items-center gap-1.5">
+                            <svg className="w-6 h-6" fill="#ff2442" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+                            <span className="text-sm">128</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                            <span className="text-sm">23</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
+                            <span className="text-sm">收藏</span>
+                          </div>
+                        </div>
+                        
+                        {/* 小红书内容区域 */}
+                        <div className="px-4 py-3">
+                          <h4 className="font-medium text-base mb-2">{generatedContent.title}</h4>
+                          <div className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{generatedContent.content}</div>
+                          <div className="mt-3 text-sm">
+                            <span className="text-blue-500">#演唱会住宿</span>{' '}
+                            <span className="text-blue-500">#北京酒店</span>{' '}
+                            <span className="text-blue-500">#演唱会攻略</span>{' '}
+                            <span className="text-blue-500">#酒店推荐</span>
+                          </div>
+                          <div className="mt-3 text-xs text-gray-400">02-14 北京</div>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {selectedPlatform === 'wechat' && (
+                      <div className="bg-black text-white max-w-sm mx-auto">
+                        {/* 微信视频区域 */}
+                        <div className="aspect-[9/16] relative">
+                          {/* 背景图片 */}
+                          {generatedContent.images[0] && (
+                            <img 
+                              src={(uploadedImages.find(i => i.id === generatedContent.images[0]) || mockImageLibrary.find(i => i.id === generatedContent.images[0]))?.url} 
+                              alt="" 
+                              className="absolute inset-0 w-full h-full object-cover"
+                            />
+                          )}
+                          
+                          {/* 渐变遮罩 */}
+                          <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/60" />
+                          
+                          {/* 微信右侧互动按钮 */}
+                          <div className="absolute right-2 bottom-24 flex flex-col items-center gap-4">
+                            <div className="flex flex-col items-center">
+                              <div className="w-10 h-10 rounded-full bg-gray-800/80 flex items-center justify-center">
+                                <svg className="w-6 h-6" fill="white" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+                              </div>
+                              <span className="text-xs mt-1">1.2w</span>
+                            </div>
+                            <div className="flex flex-col items-center">
+                              <div className="w-10 h-10 rounded-full bg-gray-800/80 flex items-center justify-center">
+                                <svg className="w-6 h-6" fill="white" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                              </div>
+                              <span className="text-xs mt-1">856</span>
+                            </div>
+                            <div className="flex flex-col items-center">
+                              <div className="w-10 h-10 rounded-full bg-gray-800/80 flex items-center justify-center">
+                                <svg className="w-6 h-6" fill="white" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>
+                              </div>
+                              <span className="text-xs mt-1">分享</span>
+                            </div>
+                            <div className="flex flex-col items-center">
+                              <div className="w-10 h-10 rounded-full bg-gray-800/80 flex items-center justify-center animate-spin" style={{ animationDuration: '3s' }}>
+                                <svg className="w-6 h-6" fill="white" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+                              </div>
+                            </div>
+                          </div>
+                          
+                          {/* 微信底部信息 */}
+                          <div className="absolute left-4 right-16 bottom-4">
+                            <div className="flex items-center gap-2 mb-2">
+                              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500" />
+                              <span className="text-sm font-medium">{currentHotel.name}</span>
+                              <button className="px-3 py-0.5 border border-white/50 rounded text-xs">关注</button>
+                            </div>
+                            <div className="text-sm mb-2 line-clamp-2">{generatedContent.title}</div>
+                            <div className="flex items-center gap-2 text-xs text-white/70">
+                              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+                              <span>周杰伦演唱会住宿攻略 - 原声</span>
+                            </div>
+                          </div>
+                          
+                          {/* 微信购物车按钮 */}
+                          <div className="absolute right-2 bottom-4">
+                            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center">
+                              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                            </div>
+                            <div className="text-center mt-1">
+                              <span className="text-xs text-yellow-400">¥{pricing?.platformPrices?.[selectedPlatform]?.price || 551}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 操作按钮 */}
+                  <div className="flex gap-3">
+                    <button
+                      onClick={copyContent}
+                      className="flex-1 py-3 bg-bg-tertiary border border-border-color rounded-lg flex items-center justify-center gap-2 hover:border-neon-cyan transition-all"
+                    >
+                      {copySuccess ? <Check size={18} className="text-neon-green" /> : <Copy size={18} />}
+                      {copySuccess ? '已复制' : '复制文案'}
+                    </button>
+                    {generatedContent.status === 'draft' ? (
+                      <button
+                        onClick={publishContent}
+                        className="flex-1 py-3 bg-neon-green/20 border border-neon-green text-neon-green rounded-lg flex items-center justify-center gap-2 hover:bg-neon-green/30 transition-all"
+                      >
+                        <Send size={18} />
+                        确认发布
+                      </button>
+                    ) : (
+                      <button
+                        disabled
+                        className="flex-1 py-3 bg-bg-tertiary border border-border-color text-text-secondary rounded-lg flex items-center justify-center gap-2"
+                      >
+                        <Check size={18} />
+                        已发布
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="h-96 flex flex-col items-center justify-center text-text-secondary">
+                  <Rocket size={64} className="mb-4 opacity-30" />
+                  <p className="text-lg mb-2">开始生成内容</p>
+                  <p className="text-sm">选择平台、模板和图片后点击生成</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 模板库 Tab */}
+      {activeTab === 'library' && (
+        <div className="space-y-6">
+          {/* 使用指南 */}
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-gradient-to-r from-neon-purple/10 to-neon-cyan/10 rounded-xl border border-neon-purple/30 p-5"
+          >
+            <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
+              <Sparkles className="text-neon-purple" size={20} />
+              {templateGuide.title}
+            </h3>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {templateGuide.tips.map((tip, idx) => (
+                <div key={idx} className="bg-bg-secondary/50 rounded-lg p-3 text-sm">
+                  <div className="text-text-secondary text-xs mb-1">{tip.scenario}</div>
+                  <div className="font-medium text-neon-cyan mb-1">推荐：{contentTemplates[tip.template as keyof typeof contentTemplates]?.name}</div>
+                  <div className="text-xs text-text-hint">{tip.reason}</div>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+
+          {/* 模板列表 */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {Object.entries(contentTemplates).map(([key, template]) => (
+              <motion.div
+                key={key}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-bg-secondary rounded-xl border border-border-color overflow-hidden"
+              >
+                {/* 模板头部 */}
+                <div className="p-5 border-b border-border-color">
+                  <div className="flex items-start gap-4">
+                    <div className="p-2 rounded-lg" style={{ background: `${template.iconColor}15` }}>
+                      <template.icon 
+                        size={32} 
+                        style={{ color: template.iconColor }}
+                        strokeWidth={1.5}
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="text-lg font-semibold mb-1">{template.name}</h3>
+                      <p className="text-sm text-text-secondary mb-3">{template.desc}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {template.platforms.map(p => {
+                          const info = platformLogos[p];
+                          return (
+                            <span 
+                              key={p} 
+                              className="px-2 py-1 rounded text-xs"
+                              style={{ background: `${info.color}20`, color: info.color }}
+                            >
+                              {info.name}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* 适用场景 */}
+                  {template.scenarios && (
+                    <div className="mt-4 pt-4 border-t border-border-color">
+                      <div className="text-xs text-text-secondary mb-2">适用场景</div>
+                      <div className="flex flex-wrap gap-2">
+                        {template.scenarios.map((scenario, idx) => (
+                          <span key={idx} className="px-2 py-1 bg-bg-tertiary rounded text-xs text-text-secondary">
+                            {scenario}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 真实案例展示 */}
+                {template.realCases && (
+                  <div className="border-b border-border-color">
+                    <div className="px-5 py-3 bg-bg-tertiary/50 text-xs text-text-secondary flex items-center gap-2">
+                      <Eye size={14} />
+                      真实案例参考（{template.realCases.length}个）
+                    </div>
+                    <div className="divide-y divide-border-color">
+                      {template.realCases.slice(0, 2).map((caseItem, idx) => (
+                        <div key={idx} className="p-5 hover:bg-bg-tertiary/30 transition-colors">
+                          <div className="flex items-start gap-3 mb-3">
+                            <span className="px-2 py-0.5 bg-neon-cyan/10 text-neon-cyan text-xs rounded">案例{idx + 1}</span>
+                            <h4 className="font-medium text-sm flex-1 line-clamp-2">{caseItem.title}</h4>
+                          </div>
+                          
+                          {/* 文案预览 */}
+                          <div className="bg-black/20 rounded-lg p-3 mb-3 text-xs text-text-secondary line-clamp-4 font-mono whitespace-pre-wrap">
+                            {caseItem.content}
+                          </div>
+                          
+                          {/* 关键信息 */}
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div className="flex items-center gap-1.5 text-text-secondary">
+                              <ImageIcon size={12} className="text-neon-purple" />
+                              <span className="truncate">{caseItem.photoTips}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-text-secondary">
+                              <Clock size={12} className="text-neon-amber" />
+                              <span>{caseItem.bestTime}</span>
+                            </div>
+                          </div>
+                          
+                          {/* 效果预期 */}
+                          <div className="mt-3 flex items-center gap-2 text-xs">
+                            <TrendingUp size={12} className="text-neon-green" />
+                            <span className="text-neon-green">{caseItem.engagement}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 操作按钮 */}
+                <div className="p-5 flex gap-3">
+                  <button
+                    onClick={() => {
+                      setSelectedTemplate(key);
+                      setActiveTab('generate');
+                    }}
+                    className="flex-1 py-2.5 bg-neon-cyan/20 text-neon-cyan rounded-lg hover:bg-neon-cyan/30 transition-all font-medium"
+                  >
+                    使用此模板
+                  </button>
+                  {template.realCases && template.realCases.length > 2 && (
+                    <button className="px-4 py-2.5 border border-border-color rounded-lg text-text-secondary hover:border-neon-cyan hover:text-neon-cyan transition-all text-sm">
+                      查看更多案例
+                    </button>
+                  )}
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 历史记录 Tab */}
+      {activeTab === 'history' && (
+        <div className="space-y-4">
+          {contentHistory.length === 0 ? (
+            <div className="text-center py-16 text-text-secondary">
+              <History size={48} className="mx-auto mb-4 opacity-30" />
+              <p>暂无历史记录</p>
+              <p className="text-sm">生成的内容将保存在这里</p>
+            </div>
+          ) : (
+            contentHistory.map((content) => {
+              const info = platformLogos[content.platform];
+              return (
+                <motion.div
+                  key={content.id}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="bg-bg-secondary rounded-xl border border-border-color p-4"
+                >
+                  <div className="flex items-start gap-4">
+                    <img 
+                      src={info.logo}
+                      alt={info.name}
+                      className="w-12 h-12 rounded-lg object-contain"
+                    />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-medium">{content.title}</span>
+                        <span className={`px-2 py-0.5 rounded text-xs ${
+                          content.status === 'published' 
+                            ? 'bg-neon-green/20 text-neon-green'
+                            : 'bg-neon-amber/20 text-neon-amber'
+                        }`}>
+                          {content.status === 'published' ? '已发布' : '草稿'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-4 text-xs text-text-secondary">
+                        <span className="flex items-center gap-1">
+                          <Calendar size={12} />
+                          {formatTime(content.generatedAt)}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <LayoutTemplate size={12} />
+                          {contentTemplates[content.template as keyof typeof contentTemplates]?.name || content.template}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <ImageIcon size={12} />
+                          {content.images.length}张图片
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => loadHistory(content)}
+                        className="p-2 hover:bg-bg-tertiary rounded-lg transition-all"
+                        title="重新编辑"
+                      >
+                        <RotateCcw size={16} />
+                      </button>
+                      <button
+                        onClick={() => deleteHistory(content.id)}
+                        className="p-2 hover:bg-neon-red/20 text-neon-red rounded-lg transition-all"
+                        title="删除"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      {/* 图片库弹窗 */}
+      <AnimatePresence>
+        {showImageLibrary && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"
+            onClick={() => setShowImageLibrary(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-bg-secondary rounded-xl border border-border-color p-6 w-full max-w-2xl max-h-[80vh] overflow-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold">选择图片 ({selectedImages.length}/9)</h3>
+                <button onClick={() => setShowImageLibrary(false)}>
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                {mockImageLibrary.map((img) => (
+                  <button
+                    key={img.id}
+                    onClick={() => {
+                      if (selectedImages.includes(img.id)) {
+                        setSelectedImages(prev => prev.filter(id => id !== img.id));
+                      } else if (selectedImages.length < 9) {
+                        setSelectedImages(prev => [...prev, img.id]);
+                      }
+                    }}
+                    className={`relative aspect-square rounded-lg overflow-hidden border-2 transition-all ${
+                      selectedImages.includes(img.id)
+                        ? 'border-neon-cyan'
+                        : 'border-transparent hover:border-neon-cyan/50'
+                    }`}
+                  >
+                    <img src={img.url} alt={img.name} className="w-full h-full object-cover" />
+                    {selectedImages.includes(img.id) && (
+                      <div className="absolute inset-0 bg-neon-cyan/30 flex items-center justify-center">
+                        <Check size={24} className="text-white" />
+                      </div>
+                    )}
+                    <div className="absolute bottom-0 left-0 right-0 bg-black/60 p-2">
+                      <div className="text-xs text-white truncate">{img.name}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <div className="mt-4 flex justify-end gap-3">
+                <button
+                  onClick={() => setShowImageLibrary(false)}
+                  className="px-4 py-2 bg-bg-tertiary rounded-lg"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={() => setShowImageLibrary(false)}
+                  className="px-4 py-2 bg-neon-cyan text-bg-primary rounded-lg"
+                >
+                  确认选择 ({selectedImages.length})
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}

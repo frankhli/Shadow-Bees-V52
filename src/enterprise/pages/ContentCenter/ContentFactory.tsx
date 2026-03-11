@@ -1,0 +1,3241 @@
+/**
+ * Shadow-Bees V52 - 内容工厂页面
+ * 完整功能：AI生成 + 图片管理 + 模板库 + 历史记录 + 发布联动
+ */
+
+import { useState, useRef, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { 
+  Rocket, Wand2, Clock, Image as ImageIcon, History, 
+  LayoutTemplate, Upload, X, Check, Copy, Send, 
+  Eye, Calendar, Sparkles, Trash2, RotateCcw,
+  Flame, Crown, Heart, Mic, TrendingUp, Download,
+  ArrowRight, AlertTriangle, Loader2, Lightbulb, FileText
+} from 'lucide-react';
+import { useEnterpriseStore } from '../../stores/enterpriseStore';
+import { ComplianceChecker } from '../../components/ComplianceChecker';
+import { complianceService, type ComplianceViolation } from '../../services/complianceService';
+import { BatchOperationBar } from '../../components/BatchOperationBar';
+import { platformLogos, modeDetails } from '../../../utils/helpers';
+import { getPricingConfig } from '../../api/pricingApi';
+import type { PricingMode } from '../../api/pricingApi';
+import { useToast } from '../../../components/ui/Toast';
+import { AnimatedNumber } from '../../components/AnimatedNumber';
+import { 
+  generateContentWithAI, 
+  batchGenerateContentWithAI,
+  uploadImageToLibrary,
+  type GenerateContentRequest 
+} from '../../api/contentApi';
+import { 
+  getHotelImageLibrary as getSharedHotelImageLibrary,
+  getHotelRecommendedImages as getSharedHotelRecommendedImages,
+  findImageById as findSharedImageById,
+} from '../../data/imageLibrary';
+// 企业版：本地定义 ContentItem 类型，避免与全局 Platform 冲突
+interface ContentItem {
+  id: string;
+  platform: 'xianyu' | 'xiaohongshu' | 'wechat' | 'douyin';
+  title: string;
+  content: string;
+  status: 'draft' | 'published';
+  scheduledFor?: string;
+  images: string[];
+  createdAt: string;
+  price: number;
+  hotelId?: string;
+  hotelName?: string;
+  performance?: {
+    impressions: number;
+    clicks: number;
+    inquiries: number;
+    conversions: number;
+    touches?: number;
+    replies?: number;
+    privateConversions?: number;
+  };
+  publishedAt?: string;
+  contentType?: string;
+  subtype?: string;
+  videoScript?: VideoScript;
+  groupScript?: GroupScript;
+  privateScript?: PrivateChatScript;
+  publishMethod?: 'manual' | 'auto';
+}
+
+// 企业版适配类型
+type Platform = 'xianyu' | 'xiaohongshu' | 'wechat' | 'douyin';
+
+// ============================================
+// 内容类型定义
+// ============================================
+type ContentType = 'image' | 'video' | 'text';
+type WechatContentSubtype = 'moments' | 'group' | 'private' | 'channels';
+
+// 视频分镜定义
+interface VideoScene {
+  id: number;
+  startTime: number;
+  endTime: number;
+  duration: number;
+  shot: string;
+  subtitle: string;
+  bgm?: string;
+  tips?: string;
+}
+
+// 拍摄素材需求
+interface ShotMaterial {
+  type: 'photo' | 'video' | 'screenshot';
+  description: string;
+  count: number;
+  tips: string;
+}
+
+// 完整的视频脚本
+interface VideoScript {
+  totalDuration: number;
+  scenes: VideoScene[];
+  materials: ShotMaterial[];
+  bgmRecommendation: string;
+  shootingTips: string[];
+  editingTips: string[];
+}
+
+// 图文内容
+interface ImageContent {
+  title: string;
+  content: string;
+  hashtags: string[];
+}
+
+// 朋友圈内容（1-9图 + 文案）
+interface MomentsContent {
+  title: string;
+  content: string;
+  imageCount: 1 | 4 | 6 | 9;
+  imageLayout: 'single' | 'grid';
+  callToAction: string;
+}
+
+// 群运营脚本
+interface GroupScript {
+  title: string;
+  content: string;
+  atAll: boolean;
+  type: 'welcome' | 'announcement' | 'flashsale' | 'interaction' | 'daily';
+}
+
+// 私聊话术
+interface PrivateChatScript {
+  title: string;
+  content: string;
+  type: 'welcome' | 'booking' | 'reminder' | 'followup' | 'rebooking';
+}
+
+// 统一的内容案例
+interface ContentCase {
+  title: string;
+  type: ContentType;
+  subtype?: WechatContentSubtype;
+  imageContent?: ImageContent;
+  videoScript?: VideoScript;
+  momentsContent?: MomentsContent;
+  groupScript?: GroupScript;
+  privateScript?: PrivateChatScript;
+  photoTips: string;
+  bestTime: string;
+  engagement: string;
+}
+
+// ============================================
+// 酒店专属图片库 - 使用共享数据源
+// ============================================
+
+// 根据酒店ID获取专属图片库（包装共享函数，保持返回格式一致）
+function getHotelImageLibrary(hotelId: string) {
+  const images = getSharedHotelImageLibrary(hotelId);
+  return images.map(img => ({
+    id: img.id,
+    url: img.url,
+    type: img.type,
+    name: img.name,
+    tags: img.tags,
+  }));
+}
+
+// 为批量生成获取每个酒店的推荐图片（前3张特色图片）
+function getHotelRecommendedImages(hotelId: string): string[] {
+  return getSharedHotelRecommendedImages(hotelId);
+}
+
+// 兼容旧代码：全局默认图片库（用于单酒店模式）
+// const mockImageLibrary = baseImagePool.slice(0, 6);
+
+// 查找图片的辅助函数（使用共享数据源）
+function findImageById(imgId: string): { id: string; url: string; name: string; type: string; tags: string[] } | undefined {
+  const img = findSharedImageById(imgId);
+  if (!img) return undefined;
+  return {
+    id: img.id,
+    url: img.url,
+    name: img.name,
+    type: img.type,
+    tags: img.tags,
+  };
+}
+
+// ============================================
+// 深度内容模板库 - 支持图文和视频
+// ============================================
+const contentTemplates: Record<string, {
+  name: string;
+  icon: React.ElementType;
+  iconColor: string;
+  desc: string;
+  platforms: Platform[];
+  scenarios: string[];
+  realCases: ContentCase[];
+}> = {
+  // 演唱会转让 - 闲鱼图文
+  concertTransfer: {
+    name: '演唱会门票转让型',
+    icon: Flame,
+    iconColor: '#FF6B6B',
+    desc: '临时有事去不了，原价转让酒店',
+    platforms: ['xianyu'],
+    scenarios: ['周杰伦演唱会', '林俊杰演唱会', '五月天演唱会', '薛之谦演唱会'],
+    realCases: [
+      {
+        title: '💔含泪转让｜周杰伦演唱会酒店｜离场馆步行5分钟',
+        type: 'image',
+        imageContent: {
+          title: '💔含泪转让｜周杰伦演唱会酒店｜离场馆步行5分钟',
+          content: '姐妹们我真的哭死😭😭😭\n好不容易抢到的周杰伦演唱会门票\n结果公司临时安排出差去不了了\n\n🏨 酒店是提前一个月订的\n📍 就在工体旁边，步行5分钟就到\n💰 当时订成¥680，现在¥520转让\n🛏️ 大床房，可以住2人\n\n‼️ 房间真的很抢手\n我当时对比了好几家才选的这家\n性价比真的很高\n\n💔 求有缘姐妹收走\n可以小刀，屠龙刀勿扰\n芝麻信用780+，诚信交易\n\n#周杰伦演唱会 #酒店转让 #北京酒店 #演唱会住宿',
+          hashtags: ['周杰伦演唱会', '酒店转让', '北京酒店', '演唱会住宿']
+        },
+        photoTips: '实拍酒店房间图+演唱会门票截图+定位截图',
+        bestTime: '演唱会前3-7天发布',
+        engagement: '咨询量高，需快速响应'
+      },
+      {
+        title: '【已出】原价出林俊杰演唱会酒店｜被朋友鸽了',
+        type: 'image',
+        imageContent: {
+          title: '【已出】原价出林俊杰演唱会酒店｜被朋友鸽了',
+          content: '姐妹们我来更新了，已经出了！感谢小红书！\n\n原帖：\n本来和闺蜜约好一起看林俊杰演唱会的\n结果她被男朋友叫去约会了😅\n\n📍 国家体育场附近酒店\n🚇 地铁直达，看完演唱会不用打车\n💰 原价¥580出，不赚差价\n\n房间细节：\n✅ 独立卫浴，24h热水\n✅ 有窗户，通风好\n✅ 楼下就是便利店\n\n本人芝麻信用极好\n可以走平台，双方都有保障\n\n#林俊杰演唱会 #酒店转让 #演唱会搭子',
+          hashtags: ['林俊杰演唱会', '酒店转让', '演唱会搭子']
+        },
+        photoTips: '聊天记录截图+酒店实拍+地铁线路图',
+        bestTime: '被鸽后当天发布',
+        engagement: '共鸣感强，容易获得同情和信任'
+      }
+    ]
+  },
+  
+  // 小红书攻略 - 图文
+  xhsGuide: {
+    name: '小红书攻略型',
+    icon: Crown,
+    iconColor: '#FFD93D',
+    desc: '真实体验分享，种草感强的攻略笔记',
+    platforms: ['xiaohongshu'],
+    scenarios: ['首次打卡', '避坑指南', '性价比推荐'],
+    realCases: [
+      {
+        title: '北京工体附近住宿｜人均200+｜看演唱会必住',
+        type: 'image',
+        imageContent: {
+          title: '北京工体附近住宿｜人均200+｜看演唱会必住',
+          content: '姐妹们！发现一家宝藏酒店！\n上周去看演唱会住这里，真的太香了！\n\n📍 位置：工体步行8分钟\n看完演唱会不用排队打车\n走回去还能买点宵夜\n\n💰 价格：我们两人住，人均¥200+\n对比附近的亚朵、全季便宜一半！\n\n🏨 房间环境：\n✨ 装修很新，拍照超出片\n🛏️ 床品很干净，睡得超舒服\n🚿 水压够大，洗头很方便\n🔇 隔音不错，不会被吵醒\n\n⚠️ 小缺点：\n房间稍微有点小\n但是200+的价格真的不能要求更多\n\n🍜 周边：\n楼下就有便利店\n步行5分钟有很多吃的\n看完演唱会不怕饿肚子\n\n💡 Tips：\n演唱会期间房源紧张\n建议提前1-2周订\n\n姐妹们还有什么问题可以问我～\n\n#北京酒店 #工体演唱会 #住宿推荐 #性价比酒店 #演唱会攻略',
+          hashtags: ['北京酒店', '工体演唱会', '住宿推荐', '性价比酒店', '演唱会攻略']
+        },
+        photoTips: '房间细节图+窗外夜景+浴室+床品特写',
+        bestTime: '工作日晚8-10点发布',
+        engagement: '互动率高，评论区多询问细节'
+      },
+      {
+        title: '避雷❗️工体附近酒店真实测评｜别被照片骗了',
+        type: 'image',
+        imageContent: {
+          title: '避雷❗️工体附近酒店真实测评｜别被照片骗了',
+          content: '之前被坑过一次\n这次特意住了3家对比\n给大家做个真实测评\n\n🚫 第一家（名字不提了）：\n照片看着很高级\n实际房间又小又旧\n窗户对着墙壁，闷死了\n价格还要¥600+\n\n✅ 第二家（推荐）：\n就是我现在住的这家\n虽然装修一般，但胜在干净\n最重要的是位置好！\n步行到工体真的只要5分钟\n价格¥400+，性价比可以\n\n⚠️ 第三家（中规中矩）：\n连锁酒店，标准配置\n没有惊喜也没有失望\n价格¥500左右\n适合对住宿要求不高的\n\n💡 总结：\n看演唱会住宿，位置>环境\n走得近真的能省很多麻烦\n\n#酒店测评 #北京住宿 #避坑指南 #真实分享',
+          hashtags: ['酒店测评', '北京住宿', '避坑指南', '真实分享']
+        },
+        photoTips: '对比图+房间实拍+窗外景色+步行路线截图',
+        bestTime: '周末下午发布',
+        engagement: '避雷类内容容易引起共鸣和传播'
+      }
+    ]
+  },
+  
+  // 微信私域运营 - 朋友圈早安
+  wechatMorning: {
+    name: '朋友圈早安模板',
+    icon: Mic,
+    iconColor: '#07C160',
+    desc: '每日早安问候，软性植入房价信息',
+    platforms: ['wechat'],
+    scenarios: ['每日问候', '房价提醒', '天气结合'],
+    realCases: [
+      {
+        title: '早安问候+房价信息',
+        type: 'image',
+        subtype: 'moments',
+        momentsContent: {
+          title: '早安北京',
+          content: '☀️ 早安！北京今天晴 18°C\n\n🏨 今日房源充足\n提前预订享早鸟价\n\n💰 今日房价：\n• 大床房 ¥329（原价¥399）\n• 双床房 ¥359（原价¥429）\n\n📍 三里屯步行5分钟\n🎫 演唱会期间不加价\n\n👇 扫码进群领20元专属券',
+          imageCount: 4,
+          imageLayout: 'grid',
+          callToAction: '扫码进群领券'
+        },
+        photoTips: '房间实拍1张+价格卡片1张+窗外景色1张+早餐1张',
+        bestTime: '早上7:30-9:00',
+        engagement: '温和种草，不引起反感'
+      },
+      {
+        title: '雨天问候+温馨氛围',
+        type: 'image',
+        subtype: 'moments',
+        momentsContent: {
+          title: '雨天温馨问候',
+          content: '🌧️ 今天下雨了，出门记得带伞\n\n如果正好在附近\n欢迎进来坐坐，喝杯热茶\n\n🏨 今日特价房：\n标准间 ¥299（限3间）\n\n适合：\n✅ 临时避雨休息\n✅ 下午茶办公\n✅ 临时过夜\n\n📞 需要的随时联系',
+          imageCount: 1,
+          imageLayout: 'single',
+          callToAction: '私信咨询'
+        },
+        photoTips: '大堂温馨一角，有热茶/咖啡氛围',
+        bestTime: '雨天上午10:00-11:00',
+        engagement: '共情营销，提升好感度'
+      }
+    ]
+  },
+
+  // 微信私域运营 - 朋友圈晒单
+  wechatTestimonial: {
+    name: '朋友圈好评晒单',
+    icon: Mic,
+    iconColor: '#07C160',
+    desc: '展示真实客人好评，建立信任',
+    platforms: ['wechat'],
+    scenarios: ['好评展示', '口碑营销', '信任建立'],
+    realCases: [
+      {
+        title: '客人好评截图+感谢文案',
+        type: 'image',
+        subtype: 'moments',
+        momentsContent: {
+          title: '感谢认可',
+          content: '💚 收到客人的好评，开心一整天\n\n"房间很干净，位置也方便，\n下次来看演唱会还住这里！"\n\n感谢每一位选择我们的朋友\n你们的认可是我们最大的动力\n\n🏨 我们会继续保持\n✨ 干净舒适的房间\n✨ 热情周到的服务\n✨ 便利的地理位置\n\n期待再次相见～',
+          imageCount: 4,
+          imageLayout: 'grid',
+          callToAction: '欢迎预订'
+        },
+        photoTips: '好评截图1张+房间实拍2张+客人退房时照片1张（如有）',
+        bestTime: '收到好评后当天',
+        engagement: '真实口碑，增强信任'
+      },
+      {
+        title: '回头客专属晒单',
+        type: 'image',
+        subtype: 'moments',
+        momentsContent: {
+          title: '感谢老朋友',
+          content: '🎉 这位客人已经是第5次入住了\n\n从第一次的"试试"\n到现在的"来这就跟回家一样"\n\n这就是我们坚持做好服务的意义\n\n💚 给回头客的专属福利：\n• 每次入住送早餐\n• 免费延迟退房\n• 专属优惠价\n\n成为我们的老朋友吧～',
+          imageCount: 6,
+          imageLayout: 'grid',
+          callToAction: '咨询会员权益'
+        },
+        photoTips: '聊天记录截图+多次入住记录+房间照片+早餐照片',
+        bestTime: '下午2-4点',
+        engagement: '强调复购价值，引导成为会员'
+      }
+    ]
+  },
+
+  // 微信私域运营 - 群运营脚本
+  wechatGroup: {
+    name: '微信群运营脚本',
+    icon: Mic,
+    iconColor: '#07C160',
+    desc: '粉丝群专属内容和互动脚本',
+    platforms: ['wechat'],
+    scenarios: ['群欢迎', '群公告', '限时闪购', '互动活动'],
+    realCases: [
+      {
+        title: '新人进群欢迎语',
+        type: 'text',
+        subtype: 'group',
+        groupScript: {
+          title: '欢迎新朋友',
+          content: '🎉 欢迎 {{昵称}} 加入希遇粉丝群！\n\n📍 本群专享福利：\n1️⃣ 群内专属价，比平台便宜20-50元\n2️⃣ 优先预订热门日期（演唱会/节假日）\n3️⃣ 不定期抽奖，免费送房券\n4️⃣ 本地吃喝玩乐攻略分享\n\n⚠️ 群规：\n❌ 禁止广告\n❌ 禁止加好友骚扰\n✅ 有问题@管理员\n\n🎁 新人礼包：\n回复【新人】领取50元券',
+          atAll: false,
+          type: 'welcome'
+        },
+        photoTips: '无需配图，纯文字',
+        bestTime: '新人入群时自动发送',
+        engagement: '明确群价值，引导互动'
+      },
+      {
+        title: '群专属闪购',
+        type: 'text',
+        subtype: 'group',
+        groupScript: {
+          title: '今晚闪购',
+          content: '⚡️ 【群内专属闪购】⚡️\n\n🕘 今晚还剩最后3间！\n\n📅 日期：今晚入住\n🛏️ 房型：豪华大床房\n💰 群内专享：¥299\n📱 携程价：¥459\n\n✨ 包含：\n• 双人早餐\n• 免费停车\n• 延迟退房至14:00\n\n⚡️ 已预订2间，还剩1间\n💬 回复【预订】锁定房间\n\n⏰ 21:00前有效，过期恢复原价',
+          atAll: true,
+          type: 'flashsale'
+        },
+        photoTips: '房间照片+价格对比图',
+        bestTime: '晚上19:00-20:00',
+        engagement: '紧迫感强，转化率高'
+      },
+      {
+        title: '群互动抽奖',
+        type: 'text',
+        subtype: 'group',
+        groupScript: {
+          title: '周末抽奖',
+          content: '🎁 【周末福利抽奖】🎁\n\n奖品：\n🥇 一等奖：免费房券1张（1名）\n🥈 二等奖：5折券1张（3名）\n🥉 三等奖：20元券1张（10名）\n\n📋 参与方式：\n1️⃣ 回复【我要抽奖】\n2️⃣ 邀请1位好友进群\n\n⏰ 开奖时间：周日晚8点\n🎲 开奖方式：群里直播摇号\n\n快来参与吧！🎉',
+          atAll: true,
+          type: 'interaction'
+        },
+        photoTips: '奖品展示图',
+        bestTime: '周五下午或周六上午',
+        engagement: '活跃群气氛，拉新获客'
+      }
+    ]
+  },
+
+  // 微信私域运营 - 私聊话术
+  wechatPrivate: {
+    name: '私聊话术模板',
+    icon: Mic,
+    iconColor: '#07C160',
+    desc: '一对一客服话术，个性化服务',
+    platforms: ['wechat'],
+    scenarios: ['新好友欢迎', '预订咨询', '入住提醒', '回访维护', '复购引导'],
+    realCases: [
+      {
+        title: '新加好友欢迎',
+        type: 'text',
+        subtype: 'private',
+        privateScript: {
+          title: '欢迎新好友',
+          content: '您好！感谢添加希遇酒店～\n\n我是您的专属客服小希\n有任何问题随时找我\n\n🎁 新朋友专属福利：\n首单立减30元\n\n快速预订方式：\n1️⃣ 发送入住日期+房型\n2️⃣ 我为您查房报价\n3️⃣ 确认后发送付款码\n\n📍 地址：三里屯路XX号\n☎️ 前台电话：010-XXXXXXX\n\n也可以直接进群，享受群内专属价哦～',
+          type: 'welcome'
+        },
+        photoTips: '酒店外观图+位置导航图',
+        bestTime: '好友添加后立即发送',
+        engagement: '建立第一印象，引导入群'
+      },
+      {
+        title: '入住后回访',
+        type: 'text',
+        subtype: 'private',
+        privateScript: {
+          title: '入住回访',
+          content: 'Hi {{姓名}}，昨晚休息得怎么样？\n\n希望我们的房间和服务让您满意\n\n💡 如果有任何建议，欢迎告诉我\n我们会不断改进～\n\n🎁 感谢您的支持：\n下次入住报暗号【老朋友】\n享专属回头客价\n\n期待再次为您服务！',
+          type: 'followup'
+        },
+        photoTips: '无需配图',
+        bestTime: '退房后当天下午',
+        engagement: '收集反馈，引导复购'
+      },
+      {
+        title: '复购引导',
+        type: 'text',
+        subtype: 'private',
+        privateScript: {
+          title: '复购优惠提醒',
+          content: '{{姓名}}，好久不见！\n\n最近有出行计划吗？\n\n🏨 给老朋友的专属优惠：\n• 大床房 ¥299（原价¥399）\n• 含双早\n• 免费升级房型（视房态）\n\n📅 近期热门日期：\n• 下周末演唱会期间\n• 清明节假期\n\n需要的话帮您提前锁定房间～',
+          type: 'rebooking'
+        },
+        photoTips: '房间实拍图',
+        bestTime: '距离上次入住30天后',
+        engagement: '激活沉睡客户'
+      }
+    ]
+  },
+
+  // 微信视频号 - 真实风格（区别于抖音）
+  wechatChannels: {
+    name: '视频号真实记录',
+    icon: Mic,
+    iconColor: '#07C160',
+    desc: '真实、无滤镜、生活化的短视频',
+    platforms: ['wechat'],
+    scenarios: ['日常记录', '客人真实体验', '幕后故事', '周边探索'],
+    realCases: [
+      {
+        title: '今天房间长这样｜原相机直出',
+        type: 'video',
+        subtype: 'channels',
+        videoScript: {
+          totalDuration: 30,
+          scenes: [
+            {
+              id: 1,
+              startTime: 0,
+              endTime: 5,
+              duration: 5,
+              shot: '手机原相机打开房间门',
+              subtitle: '今天带大家看看302房间',
+              bgm: '轻音乐或自然音',
+              tips: '原相机拍摄，不添加滤镜，展示真实光线'
+            },
+            {
+              id: 2,
+              startTime: 5,
+              endTime: 15,
+              duration: 10,
+              shot: '缓慢移动展示房间全景',
+              subtitle: '刚打扫完的样子\n阳光还不错',
+              bgm: '轻音乐',
+              tips: '手持稳定，展示真实空间大小和采光'
+            },
+            {
+              id: 3,
+              startTime: 15,
+              endTime: 22,
+              duration: 7,
+              shot: '细节展示：床品、浴室、窗外',
+              subtitle: '床品一客一换\n浴室干湿分离\n窗外是小区花园',
+              bgm: '轻音乐',
+              tips: '展示真实细节，不要过度美化'
+            },
+            {
+              id: 4,
+              startTime: 22,
+              endTime: 30,
+              duration: 8,
+              shot: '站在窗边介绍周边',
+              subtitle: '步行5分钟到工体\n楼下便利店超市都有\n需要预订的私信我～',
+              bgm: '音乐渐弱',
+              tips: '自然结束，引导私信而非直接下单'
+            }
+          ],
+          materials: [
+            { type: 'video', description: '房间全景展示', count: 1, tips: '原相机，无滤镜' },
+            { type: 'photo', description: '床品细节', count: 2, tips: '展示整洁度' },
+            { type: 'photo', description: '浴室环境', count: 1, tips: '干湿分离' },
+            { type: 'video', description: '窗外景色', count: 1, tips: '展示真实环境' }
+          ],
+          bgmRecommendation: '轻音乐或自然音，不使用抖音神曲',
+          shootingTips: [
+            '使用手机原相机，关闭美颜滤镜',
+            '选择自然光线好的时段拍摄',
+            '镜头移动要慢，让观众看清细节',
+            '不要过度剪辑，保持真实感'
+          ],
+          editingTips: [
+            '简单剪辑，不要过多特效',
+            '字幕用简洁字体，白色描边',
+            '封面选择最自然的房间角度',
+            '发布时选择"原创"，增加可信度'
+          ]
+        },
+        photoTips: '原相机拍摄，展示真实房间状态',
+        bestTime: '下午光线好时拍摄',
+        engagement: '真实感强，转发到朋友圈效果好'
+      },
+      {
+        title: '客人真实入住vlog｜来自老朋友的反馈',
+        type: 'video',
+        subtype: 'channels',
+        videoScript: {
+          totalDuration: 45,
+          scenes: [
+            {
+              id: 1,
+              startTime: 0,
+              endTime: 8,
+              duration: 8,
+              shot: '客人自拍视角：到达酒店',
+              subtitle: '又来住了，第3次了',
+              bgm: '轻松音乐',
+              tips: '邀请熟客配合拍摄，更真实'
+            },
+            {
+              id: 2,
+              startTime: 8,
+              endTime: 20,
+              duration: 12,
+              shot: '客人展示房间+使用场景',
+              subtitle: '房间还是一样干净\n床很舒服',
+              bgm: '轻松音乐',
+              tips: '记录客人真实使用过程'
+            },
+            {
+              id: 3,
+              startTime: 20,
+              endTime: 35,
+              duration: 15,
+              shot: '周边探索：便利店、餐厅',
+              subtitle: '楼下便利店买点零食\n附近很多吃的',
+              bgm: '轻松音乐',
+              tips: '展示生活便利性'
+            },
+            {
+              id: 4,
+              startTime: 35,
+              endTime: 45,
+              duration: 10,
+              shot: '离店时总结',
+              subtitle: '下次来还住这里\n推荐给朋友们',
+              bgm: '音乐渐弱',
+              tips: '真实评价，最有说服力'
+            }
+          ],
+          materials: [
+            { type: 'video', description: '客人入住过程', count: 1, tips: '客人配合拍摄' },
+            { type: 'video', description: '房间使用场景', count: 1, tips: '真实入住状态' },
+            { type: 'video', description: '周边探索', count: 1, tips: '便利店/餐厅' }
+          ],
+          bgmRecommendation: '轻快但不过于闹腾的音乐',
+          shootingTips: [
+            '邀请熟客配合，自然记录',
+            '不要摆拍，记录真实过程',
+            '可以适当的画外音交流'
+          ],
+          editingTips: [
+            '保留自然感，不要过度剪辑',
+            '真实比完美更重要'
+          ]
+        },
+        photoTips: '真实入住过程记录',
+        bestTime: '客人实际入住时',
+        engagement: '最有说服力的内容，适合老客户转发'
+      }
+    ]
+  },
+  
+  // 小红书视频 - 图文结合视频
+  xhsVideo: {
+    name: '小红书Vlog型',
+    icon: Heart,
+    iconColor: '#FF8FB1',
+    desc: '沉浸式体验、氛围感视频笔记',
+    platforms: ['xiaohongshu'],
+    scenarios: ['入住体验', ' room tour', '周边探索'],
+    realCases: [
+      {
+        title: '沉浸式入住｜工体旁的氛围感酒店',
+        type: 'video',
+        videoScript: {
+          totalDuration: 30,
+          scenes: [
+            {
+              id: 1,
+              startTime: 0,
+              endTime: 5,
+              duration: 5,
+              shot: '酒店外观+大堂',
+              subtitle: '今天入住的是工体旁的这家酒店',
+              bgm: '轻音乐前奏',
+              tips: '优雅慢推，营造高级感'
+            },
+            {
+              id: 2,
+              startTime: 5,
+              endTime: 12,
+              duration: 7,
+              shot: '刷卡进门→房间全景',
+              subtitle: '房间不大但很温馨',
+              bgm: '音乐渐强',
+              tips: 'Room Tour标准开头'
+            },
+            {
+              id: 3,
+              startTime: 12,
+              endTime: 20,
+              duration: 8,
+              shot: '床品+浴室+窗外细节',
+              subtitle: '床品很干净\n浴室干湿分离\n窗外就是CBD',
+              bgm: '继续',
+              tips: '慢镜头展示，突出质感'
+            },
+            {
+              id: 4,
+              startTime: 20,
+              endTime: 30,
+              duration: 10,
+              shot: '晚上演唱会散场走回酒店',
+              subtitle: '看完演唱会走5分钟就到家了\n真的太方便了',
+              bgm: '音乐高潮',
+              tips: '对比白天，展示便利性'
+            }
+          ],
+          materials: [
+            { type: 'video', description: '酒店大堂', count: 1, tips: '稳定器慢推' },
+            { type: 'video', description: 'Room Tour', count: 1, tips: '连贯拍摄房间' },
+            { type: 'photo', description: '床品细节', count: 3, tips: '质感特写' },
+            { type: 'video', description: '夜晚回酒店', count: 1, tips: '手持拍摄街道' }
+          ],
+          bgmRecommendation: '小红书热门BGM，轻音乐或治愈系',
+          shootingTips: [
+            '整体节奏比微信慢，突出氛围感',
+            '多用慢镜头和特写',
+            '色调保持温暖治愈'
+          ],
+          editingTips: [
+            '使用小红书自带剪辑工具',
+            '添加滤镜：奶杏、暖棕',
+            '字幕用细体字，位置在画面下方',
+            '封面选最美的房间角度'
+          ]
+        },
+        photoTips: '慢节奏Room Tour风格',
+        bestTime: '工作日晚8-10点',
+        engagement: '收藏率高，适合种草'
+      }
+    ]
+  },
+  
+  // 抖音短视频 - 真实种草风格
+  douyinShort: {
+    name: '抖音真实种草',
+    icon: Heart,
+    iconColor: '#FF0050',
+    desc: '真实体验分享，快节奏种草短视频',
+    platforms: ['douyin'],
+    scenarios: ['真实入住', '性价比安利', '探店打卡'],
+    realCases: [
+      {
+        title: '200块住CBD｜工体旁宝藏酒店｜真实无滤镜',
+        type: 'video',
+        videoScript: {
+          totalDuration: 45,
+          scenes: [
+            {
+              id: 1,
+              startTime: 0,
+              endTime: 3,
+              duration: 3,
+              shot: '酒店外观+周边环境',
+              subtitle: '兄弟们，200块住CBD！',
+              bgm: '抖音热门节奏BGM',
+              tips: '快节奏切入，3秒抓住注意力'
+            },
+            {
+              id: 2,
+              startTime: 3,
+              endTime: 8,
+              duration: 5,
+              shot: '大步走向酒店',
+              subtitle: '就在工体旁边，走路3分钟',
+              bgm: '继续',
+              tips: '展示地理位置优势'
+            },
+            {
+              id: 3,
+              startTime: 8,
+              endTime: 15,
+              duration: 7,
+              shot: '刷卡进门→房间全景（原相机）',
+              subtitle: '原相机直出，没滤镜！看看这房间',
+              bgm: '音乐卡点',
+              tips: '强调真实无滤镜，建立信任'
+            },
+            {
+              id: 4,
+              startTime: 15,
+              endTime: 25,
+              duration: 10,
+              shot: '床品特写+浴室+窗户实拍',
+              subtitle: '床品干净，浴室干湿分离，窗外就是三里屯',
+              bgm: '继续',
+              tips: '快速展示核心卖点'
+            },
+            {
+              id: 5,
+              startTime: 25,
+              endTime: 35,
+              duration: 10,
+              shot: '演唱会散场走路回酒店',
+              subtitle: '看完演唱会走5分钟就到，不用打车！',
+              bgm: '音乐高潮',
+              tips: '展示最大卖点：便利性'
+            },
+            {
+              id: 6,
+              startTime: 35,
+              endTime: 45,
+              duration: 10,
+              shot: '躺在床上+窗外夜景',
+              subtitle: '200块住这，还要什么自行车？快冲！',
+              bgm: 'BGM渐弱',
+              tips: '结尾call to action'
+            }
+          ],
+          materials: [
+            { type: 'video', description: '酒店外观走动拍摄', count: 1, tips: '手持拍摄，有运动感' },
+            { type: 'video', description: '进房间一镜到底', count: 1, tips: '原相机，不要滤镜' },
+            { type: 'photo', description: '床品细节实拍', count: 2, tips: '真实质感' },
+            { type: 'video', description: '演唱会散场回酒店', count: 1, tips: '手持跟拍' }
+          ],
+          bgmRecommendation: '抖音热门BGM，节奏感强的音乐',
+          shootingTips: [
+            '前3秒必须抓眼球，直接说价格/位置',
+            '全程手持拍摄，保持真实感',
+            '不要过度剪辑，一镜到底更真实',
+            '语速要快，信息密度高'
+          ],
+          editingTips: [
+            '剪辑节奏要快，每个镜头不超过10秒',
+            '字幕用粗体字，黄色或白色',
+            '添加抖音热门音效（叮、咚等）',
+            '封面选最有冲击力的房间角度+价格标签'
+          ]
+        },
+        photoTips: '原相机拍摄，拒绝过度美颜',
+        bestTime: '晚8-11点发布',
+        engagement: '完播率高，评论区问价多'
+      },
+      {
+        title: '别住贵了！工体旁这家酒店我住了5次｜真实分享',
+        type: 'video',
+        videoScript: {
+          totalDuration: 38,
+          scenes: [
+            {
+              id: 1,
+              startTime: 0,
+              endTime: 5,
+              duration: 5,
+              shot: '站在酒店门口自拍',
+              subtitle: '住了5次的酒店，今天必须安利给你们',
+              bgm: '抖音推荐BGM',
+              tips: '人设建立：真实用户'
+            },
+            {
+              id: 2,
+              startTime: 5,
+              endTime: 12,
+              duration: 7,
+              shot: '快速展示房间各个角落',
+              subtitle: '200多一晚，在CBD这个位置，性价比真的绝了',
+              bgm: '继续',
+              tips: '快节奏展示'
+            },
+            {
+              id: 3,
+              startTime: 12,
+              endTime: 20,
+              duration: 8,
+              shot: '窗外景色+地理位置展示',
+              subtitle: '步行到工体5分钟，楼下就是地铁',
+              bgm: '音乐卡点',
+              tips: '强调位置优势'
+            },
+            {
+              id: 4,
+              startTime: 20,
+              endTime: 30,
+              duration: 10,
+              shot: '躺在床上说话',
+              subtitle: '每次来看演唱会都住这，真心推荐给你们',
+              bgm: '继续',
+              tips: '真实推荐感'
+            },
+            {
+              id: 5,
+              startTime: 30,
+              endTime: 38,
+              duration: 8,
+              shot: '酒店门头+预订界面',
+              subtitle: '链接放左下角了，需要的自取',
+              bgm: 'BGM渐弱',
+              tips: '引导转化'
+            }
+          ],
+          materials: [
+            { type: 'video', description: '自拍开场', count: 1, tips: '自然真诚' },
+            { type: 'video', description: '房间展示', count: 1, tips: '一镜到底' },
+            { type: 'photo', description: '窗外景色', count: 2, tips: '展示位置' }
+          ],
+          bgmRecommendation: '轻快的抖音热门音乐',
+          shootingTips: [
+            '以第一人称视角拍摄',
+            '像跟朋友聊天一样说话',
+            '多展示真实入住体验'
+          ],
+          editingTips: [
+            '添加"真实分享"标签',
+            '字幕简洁有力',
+            '结尾引导关注和预订'
+          ]
+        },
+        photoTips: '真实入住场景，拒绝摆拍感',
+        bestTime: '演唱会前3-5天发布',
+        engagement: '信任度高，转化效果好'
+      }
+    ]
+  },
+  
+  // 闲鱼图文
+  xianyuDeal: {
+    name: '闲鱼捡漏型',
+    icon: Flame,
+    iconColor: '#FF9500',
+    desc: '急出、可刀、包邮等促销话术',
+    platforms: ['xianyu'],
+    scenarios: ['急出回血', '订多了转让', '行程变更'],
+    realCases: [
+      {
+        title: '【急出】演唱会酒店｜原价¥680现¥450｜可小刀',
+        type: 'image',
+        imageContent: {
+          title: '【急出】演唱会酒店｜原价¥680现¥450｜可小刀',
+          content: '急出！急出！急出！\n\n本来约好和朋友一起看演唱会的\n结果她临时有事去不了\n一个人住太浪费了\n\n📍 位置：工体旁边，步行3分钟\n📅 日期：本周六晚\n💰 价格：¥450（原价¥680）\n可小刀，别太离谱就行\n\n房间情况：\n✅ 大床房，可以住2人\n✅ 独立卫浴，有窗户\n✅ 已付定金，可以直接改入住人\n\n🎁 Bonus：\n我买了演唱会周边小礼品\n成交的话一起送你\n\n⚠️ 诚信交易\n芝麻信用极好\n可走平台，双方都安心\n\n有意直接私聊\n看到就回\n\n#演唱会酒店 #急出 #北京住宿 #转让',
+          hashtags: ['演唱会酒店', '急出', '北京住宿', '转让']
+        },
+        photoTips: '订单截图+房间实拍+周边礼品',
+        bestTime: '随时发布，尽快处理',
+        engagement: '价格敏感用户，议价较多'
+      }
+    ]
+  }
+};
+
+// 模板使用指南
+const templateGuide = {
+  title: '如何选择合适的模板？',
+  tips: [
+    { scenario: '演唱会门票已买，临时去不了', template: 'concertTransfer', reason: '真实转让场景，可信度高' },
+    { scenario: '想吸引自然流量', template: 'xhsGuide', reason: '攻略型内容搜索权重高' },
+    { scenario: '情侣/女性用户', template: 'coupleStay', reason: '氛围感强，转化率高' },
+    { scenario: '微信每日早安', template: 'wechatMorning', reason: '软性植入，不引起反感' },
+    { scenario: '朋友圈好评晒单', template: 'wechatTestimonial', reason: '建立信任，口碑营销' },
+    { scenario: '微信群限时闪购', template: 'wechatGroup', reason: '紧迫感强，群内转化率高' },
+    { scenario: '私聊激活老客户', template: 'wechatPrivate', reason: '个性化服务，引导复购' },
+    { scenario: '视频号真实记录', template: 'wechatChannels', reason: '真实感强，适合转发传播' },
+    { scenario: '抖音短视频种草', template: 'douyinShort', reason: '真实无滤镜，快节奏种草' },
+    { scenario: '快速出清库存', template: 'xianyuDeal', reason: '闲鱼用户价格敏感，成交快' },
+    { scenario: '企业客户/B端', template: 'businessTrip', reason: '专业性强，客单价高' },
+  ]
+};
+
+// ============================================
+// 历史生成记录（本地存储）
+// ============================================
+// 生成内容结果类型
+type GeneratedContent = {
+  id: string;
+  platform: Platform;
+  template: string;
+  contentType: ContentType;
+  subtype?: WechatContentSubtype;
+  title: string;
+  content: string;
+  images: string[];
+  generatedAt: string;
+  status: 'draft' | 'published' | 'expired';
+  videoScript?: VideoScript; // 视频脚本（视频类型时存在）
+  groupScript?: GroupScript; // 群运营脚本
+  privateScript?: PrivateChatScript; // 私聊话术
+  performance?: {
+    impressions: number;
+    clicks: number;
+    conversions: number;
+  };
+  // 酒店关联信息（批量生成时使用）
+  hotelId?: string;
+  hotelName?: string;
+};
+
+// ============================================
+// 主组件
+// ============================================
+export default function ContentFactory() {
+  // 企业版：使用全局酒店选择器
+  const { hotels, selectedHotelIds } = useEnterpriseStore();
+  const selectedHotels = hotels.filter(h => selectedHotelIds.includes(h.id));
+  const currentHotel = selectedHotels[0]; // 默认使用第一个选中的酒店
+  
+  // 企业版适配：模拟定价数据
+  const pricing = {
+    basePrice: 580,
+    competitorAvg: 680,
+    platformPrices: {
+      xianyu: 626,
+      xiaohongshu: 580,
+      wechat: 551,
+      douyin: 600,
+    }
+  };
+  // 酒店定价模式状态（从定价API获取）
+  const [hotelPricingModes, setHotelPricingModes] = useState<Record<string, {
+    mode: PricingMode;
+    autoApply: boolean;
+    competitorAvg: number;
+    suggestedPrice: number;
+    currentPrice: number;
+  }>>({});
+  
+  // 批量生成模式：'single'(单体) | 'batch'(批量差异化) | 'template'(母版变量)
+  const [batchGenerateMode, setBatchGenerateMode] = useState<'single' | 'batch' | 'template'>('batch');
+  
+  // 母版模板（方案B）
+  const [contentTemplate, setContentTemplate] = useState<string>(
+    `{酒店名}位于{城市}核心地段，{特色卖点}。当前{定价策略}，{房型}仅需{价格}元/晚，{行动号召}！`
+  );
+  
+  // UI状态
+  const [selectedPlatform, setSelectedPlatform] = useState<Platform>('xianyu');
+  const [selectedTemplate, setSelectedTemplate] = useState<string>('concertTransfer');
+  const [selectedImages, setSelectedImages] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<'generate' | 'library' | 'history'>('generate');
+  const [contentType, setContentType] = useState<ContentType>('image');
+  
+  // 步骤向导状态
+  const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
+  
+  // 用户上传的本地图片
+  const [uploadedImages, setUploadedImages] = useState<{ id: string; url: string; name: string }[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generateProgress, setGenerateProgress] = useState(0);
+  const [generateStatus, setGenerateStatus] = useState('');
+  const [_countdown, setCountdown] = useState(0);
+  const [showImageLibrary, setShowImageLibrary] = useState(false);
+  const [generatedContent, setGeneratedContent] = useState<GeneratedContent | null>(null);
+  const [batchGeneratedContents, setBatchGeneratedContents] = useState<GeneratedContent[]>([]); // 批量生成的所有内容
+  const [currentBatchIndex, setCurrentBatchIndex] = useState(0); // 当前查看的批量内容索引
+  const [contentHistory, setContentHistory] = useState<GeneratedContent[]>([]);
+  const [copySuccess, setCopySuccess] = useState(false);
+  
+  // 合规检测状态
+  const [, setComplianceViolations] = useState<ComplianceViolation[]>([]);
+  const [compliancePassed, setCompliancePassed] = useState(true);
+  const [isComplianceChecking, setIsComplianceChecking] = useState(false);
+  
+  // 获取当前主酒店的定价模式（用于UI显示）
+  const primaryHotelId = selectedHotelIds[0];
+  const primaryHotelMode = primaryHotelId && hotelPricingModes[primaryHotelId]?.mode || 'dynamic';
+  const mode = modeDetails[primaryHotelMode];
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const replaceImageInputRef = useRef<HTMLInputElement>(null);
+  const [replacingImageIndex, setReplacingImageIndex] = useState<number | null>(null);
+  const [isReplacingImage, setIsReplacingImage] = useState(false);
+  
+  // 图片上传处理
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+    
+    setIsUploading(true);
+    toast.info('上传中', `正在上传 ${files.length} 张图片...`);
+    
+    try {
+      const uploaded: { id: string; url: string; name: string }[] = [];
+      
+      for (const file of Array.from(files)) {
+        // 验证文件类型
+        if (!file.type.startsWith('image/')) {
+          toast.warning('跳过非图片文件', file.name);
+          continue;
+        }
+        
+        // 验证文件大小 (10MB)
+        if (file.size > 10 * 1024 * 1024) {
+          toast.warning('文件过大', `${file.name} 超过10MB限制`);
+          continue;
+        }
+        
+        // 调用上传API
+        const result = await uploadImageToLibrary(
+          selectedHotelIds[0] || 'temp-hotel',
+          file,
+          ['user-upload']
+        );
+        
+        if (result.success) {
+          uploaded.push({
+            id: result.data.id,
+            url: result.data.url,
+            name: result.data.name,
+          });
+          // 自动选中新上传的图片
+          setSelectedImages(prev => [...prev, result.data.id]);
+        }
+      }
+      
+      if (uploaded.length > 0) {
+        setUploadedImages(prev => [...prev, ...uploaded]);
+        toast.success('上传成功', `成功上传 ${uploaded.length} 张图片`);
+      } else {
+        toast.error('上传失败', '没有图片上传成功');
+      }
+    } catch (error) {
+      console.error('图片上传失败:', error);
+      toast.error('上传失败', '网络错误，请稍后重试');
+    } finally {
+      setIsUploading(false);
+      // 清空input，允许重复选择同一文件
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+  
+  // 图片替换处理
+  const handleReplaceImage = (index: number) => {
+    setReplacingImageIndex(index);
+    replaceImageInputRef.current?.click();
+  };
+  
+  const handleImageReplaceUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || replacingImageIndex === null) return;
+    
+    // 验证文件类型
+    if (!file.type.startsWith('image/')) {
+      toast.error('格式错误', '请选择图片文件');
+      return;
+    }
+    
+    // 验证文件大小 (10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      toast.warning('文件过大', '图片大小不能超过10MB');
+      return;
+    }
+    
+    setIsReplacingImage(true);
+    toast.info('替换中', '正在上传新图片...');
+    
+    try {
+      // 调用上传API
+      const result = await uploadImageToLibrary(
+        selectedHotelIds[0] || generatedContent?.hotelId || 'temp-hotel',
+        file,
+        ['replaced']
+      );
+      
+      if (!result.success) {
+        toast.error('替换失败', result.message || '请稍后重试');
+        return;
+      }
+      
+      // 更新 uploadedImages
+      setUploadedImages(prev => [...prev, {
+        id: result.data.id,
+        url: result.data.url,
+        name: result.data.name,
+      }]);
+      
+      // 更新 generatedContent 中的图片
+      if (generatedContent) {
+        const newImages = [...generatedContent.images];
+        newImages[replacingImageIndex] = result.data.id;
+        
+        const updatedContent = {
+          ...generatedContent,
+          images: newImages,
+        };
+        
+        setGeneratedContent(updatedContent);
+        
+        // 同时更新 batchGeneratedContents 中对应的内容
+        if (batchGeneratedContents.length > 0) {
+          setBatchGeneratedContents(prev => 
+            prev.map((content, idx) => 
+              idx === currentBatchIndex ? updatedContent : content
+            )
+          );
+        }
+        
+        // 更新历史记录
+        setContentHistory(prev => 
+          prev.map(c => c.id === updatedContent.id ? updatedContent : c)
+        );
+      }
+      
+      toast.success('替换成功', '图片已替换');
+    } catch (error) {
+      console.error('图片替换失败:', error);
+      toast.error('替换失败', '网络错误，请稍后重试');
+    } finally {
+      setIsReplacingImage(false);
+      setReplacingImageIndex(null);
+      if (replaceImageInputRef.current) {
+        replaceImageInputRef.current.value = '';
+      }
+    }
+  };
+
+  // 加载选中酒店的定价模式
+  useEffect(() => {
+    const loadPricingModes = async () => {
+      const modes: typeof hotelPricingModes = {};
+      
+      for (const hotelId of selectedHotelIds) {
+        try {
+          // 获取定价配置
+          const configRes = await getPricingConfig(hotelId);
+          // 获取酒店信息
+          const hotel = hotels.find(h => h.id === hotelId);
+          
+          if (configRes.success && hotel) {
+            // 模拟竞品价格和建议价格
+            const basePrice = hotel.starRating >= 4 ? 350 : 160;
+            const competitorAvg = Math.round(basePrice * (0.9 + Math.random() * 0.2));
+            const suggestedPrice = configRes.data.mode === 'clearance' 
+              ? Math.round(competitorAvg * 0.9)
+              : configRes.data.mode === 'scalper'
+              ? Math.round(competitorAvg * 1.15)
+              : competitorAvg;
+              
+            modes[hotelId] = {
+              mode: configRes.data.mode,
+              autoApply: configRes.data.autoApply,
+              competitorAvg,
+              suggestedPrice,
+              currentPrice: basePrice,
+            };
+          }
+        } catch (error) {
+          console.error(`加载酒店${hotelId}定价模式失败:`, error);
+        }
+      }
+      
+      setHotelPricingModes(modes);
+    };
+    
+    if (selectedHotelIds.length > 0) {
+      loadPricingModes();
+    }
+  }, [selectedHotelIds, hotels]);
+
+  // 从localStorage加载历史记录
+  useEffect(() => {
+    const saved = localStorage.getItem('content-history');
+    if (saved) {
+      setContentHistory(JSON.parse(saved));
+    }
+  }, []);
+
+  // 保存历史记录到localStorage
+  useEffect(() => {
+    localStorage.setItem('content-history', JSON.stringify(contentHistory));
+  }, [contentHistory]);
+
+  // Toast 提示
+  const toast = useToast();
+
+  // 价格替换辅助函数（已弃用，保留供参考）
+  // const replacePrices = (text: string, basePrice: number, competitorAvg: number, platformPrice: number): string => {
+  //   return text
+  //     .replace(/当前酒店\.name/g, currentHotel.name)
+  //     .replace(/\$\{currentHotel\.name\}/g, currentHotel.name)
+  //     .replace(/原价¥\d+/g, `原价¥${Math.round(basePrice * 1.2)}`)
+  //     .replace(/现¥\d+/g, `现¥${platformPrice}`)
+  //     .replace(/¥\d+出/g, `¥${platformPrice}出`)
+  //     .replace(/订成¥\d+/g, `订成¥${Math.round(basePrice * 1.2)}`)
+  //     .replace(/当时订成¥\d+/g, `当时订成¥${Math.round(basePrice * 1.2)}`)
+  //     .replace(/价格：¥\d+/g, `价格：¥${platformPrice}`)
+  //     .replace(/人均¥\d+/g, `人均¥${Math.round(platformPrice / 2)}`)
+  //     .replace(/¥300\/晚/g, `¥${platformPrice}/晚`)
+  //     .replace(/¥300\+/g, `¥${platformPrice}`)
+  //     .replace(/¥520/g, `¥${platformPrice}`)
+  //     .replace(/¥450/g, `¥${platformPrice}`)
+  //     .replace(/¥580/g, `¥${platformPrice}`)
+  //     .replace(/¥400\+/g, `¥${Math.round(platformPrice * 0.8)}+`)
+  //     .replace(/¥500/g, `¥${Math.round(platformPrice * 0.9)}`)
+  //     .replace(/¥600\+/g, `¥${competitorAvg}+`)
+  //     .replace(/¥680/g, `¥${Math.round(basePrice * 1.2)}`)
+  //     .replace(/¥800\+/g, `¥${competitorAvg}+`)
+  //     .replace(/比亚朵便宜¥\d+/g, `比亚朵便宜¥${Math.round(competitorAvg - platformPrice)}`)
+  //     .replace(/便宜¥\d+/g, `便宜¥${Math.round(competitorAvg - platformPrice)}`)
+  //     .replace(/协议价：¥\d+/g, `协议价：¥${platformPrice}`);
+  // };
+
+  // 生成内容 - 支持单体/批量差异化/母版变量
+  const generateContent = async () => {
+    // 单体模式下需要检查图片选择，批量模式自动使用酒店专属图片
+    if (selectedHotelIds.length === 1 && selectedImages.length === 0) {
+      toast.warning('请选择图片', '请至少选择一张图片');
+      return;
+    }
+    
+    setIsGenerating(true);
+    setGenerateProgress(0);
+    setGenerateStatus('正在分析平台风格...');
+    
+    // 模拟进度更新
+    const progressInterval = setInterval(() => {
+      setGenerateProgress(prev => {
+        if (prev >= 90) {
+          clearInterval(progressInterval);
+          return 90;
+        }
+        return prev + Math.random() * 15;
+      });
+    }, 300);
+    
+    // 更新状态文本
+    const statusTimeout1 = setTimeout(() => setGenerateStatus('正在匹配最佳模板...'), 600);
+    const statusTimeout2 = setTimeout(() => setGenerateStatus('正在生成文案内容...'), 1200);
+    const statusTimeout3 = setTimeout(() => setGenerateStatus('正在优化表达方式...'), 2000);
+    
+    try {
+      // 单酒店生成（传统模式）
+      if (selectedHotelIds.length === 1) {
+        const hotelId = selectedHotelIds[0];
+        const hotel = hotels.find(h => h.id === hotelId);
+        if (!hotel) {
+          toast.error('错误', '酒店信息不存在');
+          setIsGenerating(false);
+          return;
+        }
+        
+        const pricingMode = hotelPricingModes[hotelId]?.mode || 'dynamic';
+        const hotelPricing = hotelPricingModes[hotelId];
+        
+        // 调用AI生成API
+        const request: GenerateContentRequest = {
+          hotelId,
+          platform: selectedPlatform,
+          template: selectedTemplate,
+          contentType,
+          subtype: selectedPlatform === 'wechat' && contentType === 'text' ? 'group' : undefined,
+          images: selectedImages,
+          pricingMode,
+          hotelName: hotel.name,
+          city: hotel.city,
+          price: hotelPricing?.suggestedPrice || 580,
+          competitorAvg: hotelPricing?.competitorAvg || 680,
+        };
+        
+        setGenerateStatus('正在调用AI生成...');
+        const result = await generateContentWithAI(request);
+        
+        if (!result.success) {
+          clearInterval(progressInterval);
+          clearTimeout(statusTimeout1);
+          clearTimeout(statusTimeout2);
+          clearTimeout(statusTimeout3);
+          toast.error('生成失败', result.message || '请稍后重试');
+          setIsGenerating(false);
+          setGenerateProgress(0);
+          return;
+        }
+        
+        // 转换API返回为组件使用的格式
+        const newContent: GeneratedContent = {
+          id: result.data.id,
+          platform: selectedPlatform,
+          template: selectedTemplate,
+          contentType,
+          title: result.data.title,
+          content: result.data.content,
+          images: result.data.images,
+          generatedAt: result.data.generatedAt,
+          status: 'draft',
+          hotelId,
+          hotelName: hotel.name,
+          videoScript: result.data.videoScript,
+          groupScript: result.data.groupScript,
+          privateScript: result.data.privateScript,
+        };
+        
+        clearInterval(progressInterval);
+        clearTimeout(statusTimeout1);
+        clearTimeout(statusTimeout2);
+        clearTimeout(statusTimeout3);
+        setGenerateProgress(100);
+        setGenerateStatus('生成完成！');
+        
+        setGeneratedContent(newContent);
+        setBatchGeneratedContents([]); // 清空批量内容
+        setCurrentBatchIndex(0);
+        setContentHistory(prev => [newContent, ...prev]);
+        setCurrentStep(2);
+        toast.success('生成成功', '内容生成成功！');
+        setIsGenerating(false);
+        return;
+      }
+      
+      // 批量生成（多酒店差异化，自动使用各酒店专属图片）
+      
+      // 先检查各酒店图片库是否充足
+      const hotelsWithInsufficientImages: string[] = [];
+      for (const hotelId of selectedHotelIds) {
+        const hotel = hotels.find(h => h.id === hotelId);
+        if (!hotel) continue;
+        
+        const imageLibrary = getHotelImageLibrary(hotelId);
+        if (imageLibrary.length < 3) {
+          hotelsWithInsufficientImages.push(hotel.name);
+        }
+      }
+      
+      if (hotelsWithInsufficientImages.length > 0) {
+        clearInterval(progressInterval);
+        clearTimeout(statusTimeout1);
+        clearTimeout(statusTimeout2);
+        clearTimeout(statusTimeout3);
+        toast.warning('图片不足', `以下酒店图片不足（少于3张）：${hotelsWithInsufficientImages.join('、')}`);
+        setIsGenerating(false);
+        setGenerateProgress(0);
+        return;
+      }
+      
+      setGenerateStatus(`正在为 ${selectedHotelIds.length} 家酒店生成内容...`);
+      
+      // 构建批量生成请求
+      const requests: GenerateContentRequest[] = [];
+      for (const hotelId of selectedHotelIds) {
+        const hotel = hotels.find(h => h.id === hotelId);
+        if (!hotel) continue;
+        
+        const pricingMode = hotelPricingModes[hotelId]?.mode || 'dynamic';
+        const hotelPricing = hotelPricingModes[hotelId];
+        const hotelImages = getHotelRecommendedImages(hotelId);
+        
+        requests.push({
+          hotelId,
+          platform: selectedPlatform,
+          template: selectedTemplate,
+          contentType,
+          images: hotelImages,
+          pricingMode,
+          hotelName: hotel.name,
+          city: hotel.city,
+          price: hotelPricing?.suggestedPrice || 580,
+          competitorAvg: hotelPricing?.competitorAvg || 680,
+          batchMode: batchGenerateMode,
+        });
+      }
+      
+      // 调用批量AI生成API
+      setGenerateStatus('正在批量生成内容，请稍候...');
+      const result = await batchGenerateContentWithAI(requests);
+      
+      if (!result.success) {
+        clearInterval(progressInterval);
+        clearTimeout(statusTimeout1);
+        clearTimeout(statusTimeout2);
+        clearTimeout(statusTimeout3);
+        toast.error('生成失败', result.message || '请稍后重试');
+        setIsGenerating(false);
+        setGenerateProgress(0);
+        return;
+      }
+      
+      // 转换API返回为组件使用的格式
+      const generatedContents: GeneratedContent[] = result.data.map((item, index) => {
+        const hotel = hotels.find(h => h.id === requests[index].hotelId);
+        return {
+          id: item.id,
+          platform: selectedPlatform,
+          template: selectedTemplate,
+          contentType,
+          title: item.title,
+          content: item.content,
+          images: item.images,
+          generatedAt: item.generatedAt,
+          status: 'draft',
+          hotelId: requests[index].hotelId,
+          hotelName: hotel?.name || '',
+          videoScript: item.videoScript,
+          groupScript: item.groupScript,
+          privateScript: item.privateScript,
+        };
+      });
+      
+      clearInterval(progressInterval);
+      clearTimeout(statusTimeout1);
+      clearTimeout(statusTimeout2);
+      clearTimeout(statusTimeout3);
+      setGenerateProgress(100);
+      setGenerateStatus('批量生成完成！');
+      
+      if (generatedContents.length > 0) {
+        // 保存批量生成的所有内容
+        setBatchGeneratedContents(generatedContents);
+        setCurrentBatchIndex(0);
+        // 第一条作为主展示
+        setGeneratedContent(generatedContents[0]);
+        // 全部加入历史
+        setContentHistory(prev => [...generatedContents, ...prev]);
+        // 显示批量生成提示
+        toast.success('批量生成成功', `成功为${generatedContents.length}家酒店生成差异化内容！`);
+      }
+      
+      setCurrentStep(2);
+      
+      // 启动15分钟库存倒计时
+      setCountdown(15 * 60);
+      const timer = setInterval(() => {
+        setCountdown((prev) => {
+          if (prev <= 1) {
+            clearInterval(timer);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } catch (error) {
+      console.error('生成内容失败:', error);
+      toast.error('生成失败', '网络错误，请稍后重试');
+    } finally {
+      setIsGenerating(false);
+      setTimeout(() => setGenerateProgress(0), 500);
+    }
+  };
+
+  // 发布内容
+  const publishContent = async () => {
+    if (!generatedContent) return;
+    
+    // 合规检测
+    setIsComplianceChecking(true);
+    const checkResult = await complianceService.check({
+      content: generatedContent.content + '\n' + generatedContent.title,
+      contentId: generatedContent.id,
+      platform: generatedContent.platform,
+      contentType: generatedContent.contentType === 'video' ? 'video' : 'image',
+      hotelId: currentHotel.id,
+      hotelName: currentHotel.name,
+      source: 'content_factory',
+    });
+    setIsComplianceChecking(false);
+    
+    if (!checkResult.passed) {
+      setComplianceViolations(checkResult.violations);
+      setCompliancePassed(false);
+      toast.error('发布被阻止', `检测到 ${checkResult.violations.length} 个违规问题，请修改后重试`);
+      return;
+    }
+    
+    const isPrivateDomain = generatedContent.platform === 'wechat';
+    
+    if (isPrivateDomain) {
+      // 私域内容保存为草稿，需要到 PrivateDomain 页面手动发布
+      const draftContent: ContentItem = {
+        id: generatedContent.id,
+        platform: generatedContent.platform,
+        title: generatedContent.title,
+        content: generatedContent.content,
+        price: pricing?.platformPrices?.[generatedContent.platform as keyof typeof pricing.platformPrices] || 580,
+        status: 'draft',
+        performance: {
+          impressions: 0,
+          clicks: 0,
+          inquiries: 0,
+          conversions: 0,
+          touches: 0,
+          replies: 0,
+          privateConversions: 0,
+        },
+        createdAt: new Date().toISOString(),
+        // 保存私域内容扩展字段
+        contentType: generatedContent.contentType,
+        subtype: generatedContent.subtype,
+        videoScript: generatedContent.videoScript,
+        groupScript: generatedContent.groupScript,
+        privateScript: generatedContent.privateScript,
+        images: generatedContent.images,
+        publishMethod: 'manual',
+      };
+      
+      // 企业版：保存到本地存储
+      const savedContents = JSON.parse(localStorage.getItem('enterprise-contents') || '[]');
+      savedContents.push(draftContent);
+      localStorage.setItem('enterprise-contents', JSON.stringify(savedContents));
+      toast.success('保存成功', '私域内容已保存，请在"私域运营"页面确认后发布');
+    } else {
+      // 公域内容直接发布
+      const publishedContent = { ...generatedContent, status: 'published' as const };
+      setGeneratedContent(publishedContent);
+      setContentHistory(prev => 
+        prev.map(c => c.id === generatedContent.id ? publishedContent : c)
+      );
+      
+      const contentItem: ContentItem = {
+        id: generatedContent.id,
+        platform: generatedContent.platform,
+        title: generatedContent.title,
+        content: generatedContent.content,
+        price: pricing?.platformPrices?.[generatedContent.platform as keyof typeof pricing.platformPrices] || 580,
+        status: 'published',
+        performance: {
+          impressions: 0,
+          clicks: 0,
+          inquiries: 0,
+          conversions: 0,
+        },
+        createdAt: new Date().toISOString(),
+        publishedAt: new Date().toISOString(),
+        contentType: generatedContent.contentType,
+        subtype: generatedContent.subtype,
+        videoScript: generatedContent.videoScript,
+        groupScript: generatedContent.groupScript,
+        privateScript: generatedContent.privateScript,
+        images: generatedContent.images,
+        publishMethod: 'auto',
+      };
+      
+      // 企业版：保存到本地存储
+      const savedContents = JSON.parse(localStorage.getItem('enterprise-contents') || '[]');
+      savedContents.push(contentItem);
+      localStorage.setItem('enterprise-contents', JSON.stringify(savedContents));
+      toast.success('发布成功', '内容已发布，可在"发布状态"页面查看');
+    }
+  };
+
+  // 复制内容
+  const copyContent = () => {
+    if (!generatedContent) return;
+    navigator.clipboard.writeText(`${generatedContent.title}\n\n${generatedContent.content}`);
+    setCopySuccess(true);
+    setTimeout(() => setCopySuccess(false), 2000);
+  };
+
+  // 删除历史记录
+  const deleteHistory = (id: string) => {
+    setContentHistory(prev => prev.filter(c => c.id !== id));
+  };
+
+  // 重新加载历史内容
+  const loadHistory = (content: GeneratedContent) => {
+    setGeneratedContent(content);
+    setSelectedPlatform(content.platform);
+    setSelectedTemplate(content.template);
+    setSelectedImages(content.images);
+    setActiveTab('generate');
+  };
+
+  // 格式化时间
+  const formatTime = (iso: string) => {
+    return new Date(iso).toLocaleString('zh-CN', { 
+      month: 'short', 
+      day: 'numeric', 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+  };
+
+  // 计算统计数据
+  const stats = useMemo(() => {
+    const totalContents = contentHistory.length;
+    const publishedContents = contentHistory.filter(c => c.status === 'published').length;
+    const totalImpressions = contentHistory.reduce((sum, c) => sum + (c.performance?.impressions || 0), 0);
+    const totalConversions = contentHistory.reduce((sum, c) => sum + (c.performance?.conversions || 0), 0);
+    const conversionRate = totalImpressions > 0 ? Math.round((totalConversions / totalImpressions) * 100) : 0;
+    
+    return {
+      totalContents,
+      publishedContents,
+      totalImpressions,
+      totalConversions,
+      conversionRate,
+    };
+  }, [contentHistory]);
+  
+  // 数字动画配置
+  const [animatedStats, setAnimatedStats] = useState({
+    totalContents: 0,
+    publishedContents: 0,
+    totalImpressions: 0,
+    totalConversions: 0,
+    conversionRate: 0,
+  });
+  
+  // 当统计数据变化时触发动画
+  useEffect(() => {
+    setAnimatedStats(stats);
+  }, [stats]);
+
+  // 未选择酒店时的空状态
+  if (!currentHotel) {
+    return (
+      <div className="p-6">
+        <div className="flex flex-col items-center justify-center py-20 bg-gray-50 rounded-xl border border-gray-200">
+          <Rocket className="w-16 h-16 text-gray-300 mb-4" />
+          <h3 className="text-lg font-medium text-gray-900 mb-2">请先选择酒店</h3>
+          <p className="text-sm text-gray-500 text-center max-w-md">
+            请在顶部酒店选择器中至少选择一家酒店，使用AI内容工厂生成营销内容
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6 space-y-6">
+      {/* 批量操作提示 */}
+      <BatchOperationBar />
+      
+      {/* 页面标题 + 统计卡片 + Tab切换 */}
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-gray-900">内容工厂</h1>
+            <span className="px-2 py-0.5 rounded text-xs bg-violet-100 text-violet-700 border border-violet-200">
+              {selectedHotels.length > 1 ? `批量生成 (${selectedHotels.length}家)` : mode.label}
+            </span>
+          </div>
+          <p className="text-sm text-gray-500 mt-1">
+            {selectedHotels.length > 1 
+              ? `为 ${selectedHotels.length} 家酒店批量生成差异化内容`
+              : `AI生成多平台差异化内容 - ${currentHotel?.name || '当前酒店'}`
+            }
+          </p>
+        </div>
+        
+        <div className="flex items-center gap-2 bg-gray-100 rounded-xl p-1">
+          {[
+            { key: 'generate', icon: Sparkles, label: '生成内容' },
+            { key: 'library', icon: LayoutTemplate, label: '模板库' },
+            { key: 'history', icon: History, label: '历史记录', badge: contentHistory.length },
+          ].map((tab) => {
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key as any)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-all ${
+                  activeTab === tab.key
+                    ? 'bg-violet-100 text-violet-600'
+                    : 'text-gray-500 hover:text-gray-900'
+                }`}
+              >
+                <Icon size={16} />
+                <span>{tab.label}</span>
+                {tab.badge ? (
+                  <span className="px-1.5 py-0.5 bg-violet-200 rounded text-xs">{tab.badge}</span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 关键指标统计卡片 */}
+      <div className="grid grid-cols-4 gap-4">
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-gray-100 rounded-xl p-4 border border-gray-200"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-gray-500">生成内容</span>
+            <div className="w-8 h-8 rounded-lg bg-violet-50 flex items-center justify-center">
+              <Rocket size={16} className="text-violet-600" />
+            </div>
+          </div>
+          <div className="text-2xl font-bold text-violet-600">
+            <AnimatedNumber value={animatedStats.totalContents} duration={1} />
+          </div>
+          <div className="text-xs text-gray-500 mt-1">
+            已发布 <AnimatedNumber value={animatedStats.publishedContents} duration={1} />
+          </div>
+        </motion.div>
+        
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.05 }}
+          className="bg-gray-100 rounded-xl p-4 border border-gray-200"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-gray-500">总曝光</span>
+            <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center">
+              <Eye size={16} className="text-purple-400" />
+            </div>
+          </div>
+          <div className="text-2xl font-bold text-purple-400">
+            <AnimatedNumber value={animatedStats.totalImpressions} duration={1.5} format={(n) => Math.round(n).toLocaleString()} />
+          </div>
+          <div className="text-xs text-gray-500 mt-1">累计浏览量</div>
+        </motion.div>
+        
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="bg-gray-100 rounded-xl p-4 border border-gray-200"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-gray-500">成交转化</span>
+            <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center">
+              <TrendingUp size={16} className="text-emerald-600" />
+            </div>
+          </div>
+          <div className="text-2xl font-bold text-emerald-600">
+            <AnimatedNumber value={animatedStats.totalConversions} duration={1.2} />
+          </div>
+          <div className="text-xs text-gray-500 mt-1">
+            转化率 <AnimatedNumber value={animatedStats.conversionRate} duration={1} suffix="%" />
+          </div>
+        </motion.div>
+        
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.15 }}
+          className="bg-gray-100 rounded-xl p-4 border border-gray-200"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-gray-500">当前模式</span>
+            <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center">
+              <mode.icon size={16} style={{ color: mode.color }} />
+            </div>
+          </div>
+          <div className="text-lg font-bold" style={{ color: mode.color }}>{mode.label}</div>
+          <div className="text-xs text-gray-500 mt-1">{mode.description}</div>
+        </motion.div>
+      </div>
+
+      {/* 生成内容 Tab - 步骤向导 */}
+      {activeTab === 'generate' && (
+        <div className="space-y-6">
+          {/* 步骤导航 */}
+          <div className="bg-gray-100 rounded-xl border border-gray-200 p-6">
+            <div className="flex items-center justify-between">
+              {/* 步骤1 */}
+              <div className="flex items-center gap-4">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${
+                  currentStep >= 1 ? 'bg-neon-cyan text-bg-primary' : 'bg-gray-50 text-gray-500'
+                }`}>
+                  1
+                </div>
+                <div>
+                  <div className={`font-medium ${currentStep >= 1 ? 'text-gray-900' : 'text-gray-500'}`}>选择配置</div>
+                  <div className="text-xs text-gray-500">平台、模板、图片</div>
+                </div>
+              </div>
+              
+              {/* 连接线 */}
+              <div className={`flex-1 h-1 mx-6 rounded ${currentStep >= 2 ? 'bg-neon-cyan' : 'bg-gray-50'}`} />
+              
+              {/* 步骤2 */}
+              <div className="flex items-center gap-4">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${
+                  currentStep >= 2 ? 'bg-neon-cyan text-bg-primary' : 'bg-gray-50 text-gray-500'
+                }`}>
+                  2
+                </div>
+                <div>
+                  <div className={`font-medium ${currentStep >= 2 ? 'text-gray-900' : 'text-gray-500'}`}>生成预览</div>
+                  <div className="text-xs text-gray-500">AI生成内容</div>
+                </div>
+              </div>
+              
+              {/* 连接线 */}
+              <div className={`flex-1 h-1 mx-6 rounded ${currentStep >= 3 ? 'bg-neon-cyan' : 'bg-gray-50'}`} />
+              
+              {/* 步骤3 */}
+              <div className="flex items-center gap-4">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${
+                  currentStep >= 3 ? 'bg-neon-cyan text-bg-primary' : 'bg-gray-50 text-gray-500'
+                }`}>
+                  3
+                </div>
+                <div>
+                  <div className={`font-medium ${currentStep >= 3 ? 'text-gray-900' : 'text-gray-500'}`}>导出发布</div>
+                  <div className="text-xs text-gray-500">复制或导出</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 步骤内容 */}
+          <div className="min-h-[500px]">
+            {/* ===== 步骤1：选择配置 ===== */}
+            {currentStep === 1 && (
+              <div className="grid grid-cols-3 gap-6">
+                {/* 左列：基础设置 */}
+                <div className="space-y-6">
+                  {/* 市场态势 - 与全域定价联动 */}
+                  <div className="bg-gray-100 rounded-xl border border-gray-200 p-5">
+                    <h3 className="font-medium mb-3 flex items-center gap-2">
+                      <Eye size={16} className="text-violet-600" />
+                      当前市场态势
+                      {selectedHotelIds.length > 1 && (
+                        <span className="text-xs text-gray-400">({selectedHotelIds.length}家酒店)</span>
+                      )}
+                    </h3>
+                    <div className="flex items-center gap-2 mb-3">
+                      <mode.icon size={24} style={{ color: mode.color }} />
+                      <div>
+                        <div className="font-medium" style={{ color: mode.color }}>{mode.label}</div>
+                        <div className="text-xs text-gray-500">{mode.contentAngle}</div>
+                      </div>
+                    </div>
+                    {primaryHotelId && hotelPricingModes[primaryHotelId] && (
+                      <div className="text-xs text-gray-500 space-y-1">
+                        <div>建议价: <span className="text-violet-600 font-medium">¥{hotelPricingModes[primaryHotelId].suggestedPrice}</span></div>
+                        <div>竞品均价: <span className="text-gray-600">¥{hotelPricingModes[primaryHotelId].competitorAvg}</span></div>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* 批量生成模式（多酒店时显示） */}
+                  {selectedHotelIds.length > 1 && (
+                    <div className="bg-gradient-to-r from-violet-50 to-purple-50 rounded-xl border border-violet-200 p-5">
+                      <h3 className="font-medium mb-3 flex items-center gap-2 text-violet-800">
+                        <Sparkles size={16} />
+                        批量生成模式
+                      </h3>
+                      <div className="space-y-2">
+                        <button
+                          onClick={() => setBatchGenerateMode('batch')}
+                          className={`w-full p-3 rounded-lg border text-left transition-all ${
+                            batchGenerateMode === 'batch'
+                              ? 'border-violet-500 bg-white shadow-sm'
+                              : 'border-violet-200 hover:border-violet-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={batchGenerateMode === 'batch' ? 'text-violet-700 font-medium' : 'text-gray-600'}>
+                              🤖 智能差异化
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1">根据每家酒店定价模式和特点自动生成不同角度文案</p>
+                        </button>
+                        <button
+                          onClick={() => setBatchGenerateMode('template')}
+                          className={`w-full p-3 rounded-lg border text-left transition-all ${
+                            batchGenerateMode === 'template'
+                              ? 'border-violet-500 bg-white shadow-sm'
+                              : 'border-violet-200 hover:border-violet-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={batchGenerateMode === 'template' ? 'text-violet-700 font-medium' : 'text-gray-600'}>
+                              📝 母版变量模式
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1">使用母版模板，自动填充各酒店差异化信息</p>
+                        </button>
+                      </div>
+                      
+                      {/* 母版模板编辑器 */}
+                      {batchGenerateMode === 'template' && (
+                        <div className="mt-3 pt-3 border-t border-violet-200">
+                          <label className="text-xs text-violet-700 mb-2 block">母版模板（使用{'{}'}标记变量）</label>
+                          <textarea
+                            value={contentTemplate}
+                            onChange={(e) => setContentTemplate(e.target.value)}
+                            className="w-full p-3 text-sm border border-violet-200 rounded-lg bg-white focus:ring-2 focus:ring-violet-300 focus:border-violet-400"
+                            rows={4}
+                            placeholder="输入模板，如：{酒店名}位于{城市}..."
+                          />
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {['酒店名', '城市', '特色卖点', '定价策略', '房型', '价格', '行动号召'].map((v) => (
+                              <button
+                                key={v}
+                                onClick={() => setContentTemplate(prev => prev + `{${v}}`)}
+                                className="px-2 py-1 text-xs bg-violet-100 text-violet-700 rounded hover:bg-violet-200"
+                              >
+                                +{v}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 内容类型 */}
+                  <div className="bg-gray-100 rounded-xl border border-gray-200 p-5">
+                    <h3 className="font-medium mb-3">内容形式</h3>
+                    <div className="space-y-2">
+                      <button
+                        onClick={() => {
+                          setContentType('image');
+                          if (selectedPlatform === 'wechat') setSelectedPlatform('xiaohongshu');
+                        }}
+                        className={`w-full p-3 rounded-lg border text-left transition-all ${
+                          contentType === 'image'
+                            ? 'border-neon-cyan bg-violet-50'
+                            : 'border-gray-200 hover:border-neon-cyan/50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <ImageIcon size={18} className={contentType === 'image' ? 'text-violet-600' : 'text-gray-500'} />
+                          <span className={contentType === 'image' ? 'text-violet-600' : ''}>图文笔记</span>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">适合小红书、闲鱼、朋友圈（抖音请选短视频）</p>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setContentType('video');
+                          if (selectedPlatform === 'xianyu') setSelectedPlatform('douyin');
+                        }}
+                        className={`w-full p-3 rounded-lg border text-left transition-all ${
+                          contentType === 'video'
+                            ? 'border-neon-purple bg-neon-purple/10'
+                            : 'border-gray-200 hover:border-neon-purple/50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Mic size={18} className={contentType === 'video' ? 'text-neon-purple' : 'text-gray-500'} />
+                          <span className={contentType === 'video' ? 'text-neon-purple' : ''}>短视频</span>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">适合抖音、视频号、小红书</p>
+                      </button>
+                      {selectedPlatform === 'wechat' && (
+                        <button
+                          onClick={() => setContentType('text')}
+                          className={`w-full p-3 rounded-lg border text-left transition-all ${
+                            contentType === 'text'
+                              ? 'border-neon-green bg-emerald-50'
+                              : 'border-gray-200 hover:border-neon-green/50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <Mic size={18} className={contentType === 'text' ? 'text-emerald-600' : 'text-gray-500'} />
+                            <span className={contentType === 'text' ? 'text-emerald-600' : ''}>私域文案</span>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1">适合微信群、私聊话术</p>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 平台选择 */}
+                  <div className="bg-gray-100 rounded-xl border border-gray-200 p-5">
+                    <h3 className="font-medium mb-3">发布平台</h3>
+                    <div className="space-y-2">
+                      {(contentType === 'video' 
+                        ? ['douyin', 'xiaohongshu', 'wechat'] as Platform[]
+                        : contentType === 'text'
+                        ? ['wechat'] as Platform[]
+                        : ['xianyu', 'xiaohongshu', 'wechat'] as Platform[]
+                      ).map((platform) => {
+                        const info = platformLogos[platform];
+                        return (
+                          <button
+                            key={platform}
+                            onClick={() => setSelectedPlatform(platform)}
+                            className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-all ${
+                              selectedPlatform === platform
+                                ? 'border-neon-cyan bg-violet-50'
+                                : 'border-gray-200 hover:border-neon-cyan/50'
+                            }`}
+                          >
+                            <img src={info.logo} alt={info.name} className="w-8 h-8 rounded object-contain" />
+                            <div className="flex-1 text-left">
+                              <div className="font-medium text-sm">{info.name}</div>
+                            </div>
+                            {selectedPlatform === platform && <Check size={14} className="text-violet-600" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-3 p-2 bg-amber-50 rounded text-xs text-amber-600">
+                      {contentType === 'video' 
+                        ? <span className="flex items-center gap-1"><Lightbulb className="w-3 h-3" /> 短视频支持抖音、小红书、视频号，不支持闲鱼</span>
+                        : contentType === 'text'
+                        ? <span className="flex items-center gap-1"><Lightbulb className="w-3 h-3" /> 私域文案仅支持微信</span>
+                        : <span className="flex items-center gap-1"><Lightbulb className="w-3 h-3" /> 朋友圈图文请选择微信</span>}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 中列：模板选择 */}
+                <div className="bg-gray-100 rounded-xl border border-gray-200 p-5">
+                  <h3 className="font-medium mb-4">选择模板</h3>
+                  <div className="space-y-3 max-h-[500px] overflow-y-auto">
+                    {Object.entries(contentTemplates).map(([key, template]) => {
+                      // 过滤不支持当前平台的模板
+                      if (!template.platforms.includes(selectedPlatform)) return null;
+                      
+                      // 过滤不支持当前内容类型的模板
+                      const hasSuitableCase = template.realCases.some(c => {
+                        if (contentType === 'text') {
+                          // 文本类型：群运营或私聊话术
+                          return c.subtype === 'group' || c.subtype === 'private';
+                        }
+                        return c.type === contentType;
+                      });
+                      if (!hasSuitableCase) return null;
+                      
+                      const Icon = template.icon;
+                      const isSelected = selectedTemplate === key;
+                      return (
+                        <button
+                          key={key}
+                          onClick={() => setSelectedTemplate(key)}
+                          className={`w-full p-4 rounded-lg border text-left transition-all ${
+                            isSelected
+                              ? 'border-neon-cyan bg-violet-50'
+                              : 'border-gray-200 hover:border-neon-cyan/50'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="p-2 rounded-lg" style={{ background: `${template.iconColor}20` }}>
+                              <Icon size={20} style={{ color: template.iconColor }} />
+                            </div>
+                            <div className="flex-1">
+                              <div className={`font-medium ${isSelected ? 'text-violet-600' : ''}`}>{template.name}</div>
+                              <div className="text-xs text-gray-500 mt-1">{template.desc}</div>
+                              <div className="flex flex-wrap gap-1 mt-2">
+                                {template.scenarios.slice(0, 2).map((s, i) => (
+                                  <span key={i} className="text-[10px] px-1.5 py-0.5 bg-gray-50 rounded text-gray-500">{s}</span>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 右列：图片选择 */}
+                <div className="bg-gray-100 rounded-xl border border-gray-200 p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="font-medium">选择图片 ({selectedImages.length}/9)</h3>
+                      {selectedHotelIds.length === 1 && (
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          {hotels.find(h => h.id === selectedHotelIds[0])?.name} 专属图库
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => setShowImageLibrary(true)}
+                      className="text-xs text-violet-600 hover:underline"
+                    >
+                      从图库选择
+                    </button>
+                  </div>
+                  
+                  <div className="grid grid-cols-3 gap-2 mb-4">
+                    {selectedImages.map((imgId) => {
+                      const img = uploadedImages.find(i => i.id === imgId) || findImageById(imgId);
+                      return (
+                        <div key={imgId} className="relative aspect-square rounded-lg overflow-hidden">
+                          <img src={img?.url || ''} alt={img?.name || ''} className="w-full h-full object-cover" />
+                          <button
+                            onClick={() => setSelectedImages(prev => prev.filter(id => id !== imgId))}
+                            className="absolute top-1 right-1 w-5 h-5 bg-neon-red rounded-full flex items-center justify-center"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                    {selectedImages.length < 9 && (
+                      <button
+                        onClick={() => setShowImageLibrary(true)}
+                        className="aspect-square rounded-lg border-2 border-dashed border-gray-200 flex flex-col items-center justify-center text-gray-500 hover:border-neon-cyan hover:text-violet-600 transition-all"
+                      >
+                        <Upload size={20} />
+                        <span className="text-xs mt-1">添加</span>
+                      </button>
+                    )}
+                  </div>
+                  
+                  <input 
+                    ref={fileInputRef} 
+                    type="file" 
+                    accept="image/*" 
+                    multiple 
+                    className="hidden" 
+                    onChange={handleImageUpload}
+                    disabled={isUploading}
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploading}
+                    className="w-full py-2 border border-dashed border-gray-200 rounded-lg text-sm text-gray-500 hover:border-neon-cyan hover:text-violet-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isUploading ? '上传中...' : '+ 上传本地图片'}
+                  </button>
+                  
+                  {/* 批量模式：显示各酒店图片库状态 */}
+                  {selectedHotelIds.length > 1 && (
+                    <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+                      <div className="text-xs text-gray-500 mb-2">各酒店图片库状态：</div>
+                      <div className="space-y-1 max-h-24 overflow-y-auto">
+                        {selectedHotelIds.map(hotelId => {
+                          const hotel = hotels.find(h => h.id === hotelId);
+                          const imageCount = getHotelImageLibrary(hotelId).length;
+                          const isInsufficient = imageCount < 3;
+                          return (
+                            <div key={hotelId} className="flex items-center justify-between text-xs">
+                              <span className="text-gray-700">{hotel?.name}</span>
+                              <span className={isInsufficient ? 'text-red-500' : 'text-emerald-600'}>
+                                {imageCount}张 {isInsufficient && <AlertTriangle className="w-3 h-3 inline" />}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {selectedHotelIds.some(id => getHotelImageLibrary(id).length < 3) && (
+                        <div className="mt-2 text-xs text-amber-600 flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3" /> 部分酒店图片不足3张，建议先到图片库管理上传
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 下一步按钮 */}
+                  <button
+                    onClick={() => setCurrentStep(2)}
+                    disabled={selectedHotelIds.length === 1 && selectedImages.length === 0}
+                    className="w-full mt-6 py-3 bg-gradient-to-r from-violet-500 to-blue-500 rounded-xl font-semibold text-bg-primary flex items-center justify-center gap-2 disabled:opacity-50 transition-all"
+                  >
+                    {selectedHotelIds.length > 1 ? (
+                      <>开始批量生成 ({selectedHotelIds.length}家酒店)</>
+                    ) : (
+                      <>下一步：生成内容</>
+                    )}
+                    <ArrowRight size={18} />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ===== 步骤2：生成预览 ===== */}
+            {currentStep === 2 && (
+              <div className="grid grid-cols-12 gap-6">
+                {/* 左侧：配置摘要 */}
+                <div className="col-span-3 space-y-4">
+                  <div className="bg-gray-100 rounded-xl border border-gray-200 p-5">
+                    <h3 className="font-medium mb-4 flex items-center gap-2">
+                      <Check size={16} className="text-emerald-600" />
+                      当前配置
+                    </h3>
+                    <div className="space-y-4">
+                      {/* 平台信息 */}
+                      <div className="p-3 bg-gray-50 rounded-lg">
+                        <div className="text-xs text-gray-500 mb-1">发布平台</div>
+                        <div className="flex items-center gap-2">
+                          <img 
+                            src={platformLogos[selectedPlatform].logo}
+                            alt={platformLogos[selectedPlatform].name}
+                            className="w-6 h-6 rounded object-contain"
+                          />
+                          <span className="font-medium">{platformLogos[selectedPlatform].name}</span>
+                        </div>
+                      </div>
+                      
+                      {/* 模板信息 */}
+                      <div className="p-3 bg-gray-50 rounded-lg">
+                        <div className="text-xs text-gray-500 mb-1">内容模板</div>
+                        <div className="font-medium text-sm">
+                          {contentTemplates[selectedTemplate as keyof typeof contentTemplates]?.name}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">
+                          {contentTemplates[selectedTemplate as keyof typeof contentTemplates]?.desc}
+                        </div>
+                      </div>
+                      
+                      {/* 内容类型 */}
+                      <div className="p-3 bg-gray-50 rounded-lg">
+                        <div className="text-xs text-gray-500 mb-1">内容形式</div>
+                        <div className="flex items-center gap-2">
+                          {contentType === 'image' ? (
+                            <>
+                              <ImageIcon size={16} className="text-violet-600" />
+                              <span>图文笔记</span>
+                            </>
+                          ) : (
+                            <>
+                              <Mic size={16} className="text-neon-purple" />
+                              <span>短视频</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {/* 图片数量 - 单体模式显示已选，批量模式显示自动分配信息 */}
+                      <div className="p-3 bg-gray-50 rounded-lg">
+                        <div className="text-xs text-gray-500 mb-1">
+                          {selectedHotelIds.length > 1 ? '图片分配' : '已选图片'}
+                        </div>
+                        <div className="font-medium">
+                          {selectedHotelIds.length > 1 ? (
+                            <span className="text-violet-600">自动匹配各酒店图片</span>
+                          ) : (
+                            `${selectedImages.length} 张`
+                          )}
+                        </div>
+                        {selectedHotelIds.length > 1 && (
+                          <div className="text-xs text-gray-400 mt-1">
+                            每家酒店使用其专属图库前3张
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* 上一步按钮 */}
+                  <button
+                    onClick={() => setCurrentStep(1)}
+                    className="w-full py-3 bg-gray-50 border border-gray-200 rounded-xl font-medium flex items-center justify-center gap-2 hover:border-neon-cyan transition-all"
+                  >
+                    ← 返回修改配置
+                  </button>
+                </div>
+
+                {/* 中间：生成操作区 */}
+                <div className="col-span-4">
+                  <div className="bg-gray-100 rounded-xl border border-gray-200 p-6 h-full flex flex-col">
+                    <h3 className="font-medium mb-6 flex items-center gap-2">
+                      <Wand2 size={18} className="text-violet-600" />
+                      AI 内容生成
+                    </h3>
+                    
+                    {/* 生成按钮 */}
+                    {!generatedContent && !isGenerating && (
+                      <div className="flex-1 flex flex-col items-center justify-center">
+                        <div className="w-24 h-24 rounded-full bg-gradient-to-br from-violet-500/20 to-blue-500/20 flex items-center justify-center mb-6">
+                          <Sparkles size={40} className="text-violet-600" />
+                        </div>
+                        <p className="text-lg font-medium mb-2">准备好生成内容了</p>
+                        <p className="text-sm text-gray-500 text-center mb-6">
+                          AI将根据您的配置自动生成<br />适合{platformLogos[selectedPlatform].name}的{
+                            contentType === 'image' 
+                              ? '图文内容' 
+                              : contentType === 'video' 
+                              ? '视频脚本'
+                              : '私域运营文案'
+                          }
+                        </p>
+                        <button
+                          onClick={generateContent}
+                          className={`px-8 py-4 rounded-xl font-semibold text-bg-primary flex items-center gap-3 transition-all hover:shadow-lg ${
+                            contentType === 'video'
+                              ? 'bg-gradient-to-r from-neon-purple to-pink-500 hover:shadow-neon-purple/30'
+                              : 'bg-gradient-to-r from-violet-500 to-blue-500 hover:shadow-neon-cyan/30'
+                          }`}
+                        >
+                          <Wand2 size={20} />
+                          开始生成
+                        </button>
+                      </div>
+                    )}
+                    
+                    {/* 生成中动画 */}
+                    {isGenerating && (
+                      <div className="flex-1 flex flex-col items-center justify-center">
+                        <motion.div
+                          animate={{ rotate: 360, scale: [1, 1.1, 1] }}
+                          transition={{ rotate: { duration: 2, repeat: Infinity, ease: 'linear' }, scale: { duration: 1, repeat: Infinity } }}
+                          className="w-24 h-24 rounded-full border-4 border-violet-200 border-t-neon-cyan flex items-center justify-center mb-6"
+                        >
+                          <Sparkles size={32} className="text-violet-600" />
+                        </motion.div>
+                        <p className="text-lg font-medium mb-2">AI正在创作中...</p>
+                        <p className="text-sm text-violet-600 mb-4">{generateStatus}</p>
+                        
+                        {/* 进度条 */}
+                        <div className="w-48 h-2 bg-gray-200 rounded-full overflow-hidden mb-2">
+                          <motion.div 
+                            className="h-full bg-gradient-to-r from-violet-500 to-neon-cyan"
+                            initial={{ width: 0 }}
+                            animate={{ width: `${Math.min(generateProgress, 100)}%` }}
+                            transition={{ duration: 0.3, ease: 'easeOut' }}
+                          />
+                        </div>
+                        <p className="text-xs text-gray-400">{Math.round(Math.min(generateProgress, 100))}%</p>
+                      </div>
+                    )}
+                    
+                    {/* 生成完成提示 */}
+                    {generatedContent && !isGenerating && (
+                      <div className="flex-1 flex flex-col items-center justify-center">
+                        <motion.div
+                          initial={{ scale: 0 }}
+                          animate={{ scale: 1 }}
+                          className="w-24 h-24 rounded-full bg-neon-green/20 flex items-center justify-center mb-6"
+                        >
+                          <Check size={48} className="text-emerald-600" />
+                        </motion.div>
+                        <p className="text-lg font-medium mb-2">内容生成成功！</p>
+                        <p className="text-sm text-gray-500 text-center mb-6">
+                          预览效果满意后<br />点击下一步进行发布
+                        </p>
+                        <button
+                          onClick={() => setCurrentStep(3)}
+                          className="px-8 py-4 bg-gradient-to-r from-neon-green to-emerald-500 rounded-xl font-semibold text-bg-primary flex items-center gap-3 hover:shadow-lg hover:shadow-neon-green/30 transition-all"
+                        >
+                          下一步：导出发布
+                          <ArrowRight size={18} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 右侧：预览区域 */}
+                <div className="col-span-5">
+                  <div className="bg-gray-100 rounded-xl border border-gray-200 p-5 h-full">
+                    <h3 className="font-medium mb-4 flex items-center justify-between">
+                      <span className="flex items-center gap-2">
+                        <Eye size={16} className="text-violet-600" />
+                        内容预览
+                        {batchGeneratedContents.length > 1 && (
+                          <span className="text-xs text-gray-500">
+                            ({currentBatchIndex + 1}/{batchGeneratedContents.length})
+                          </span>
+                        )}
+                      </span>
+                      {generatedContent && (
+                        <span className="text-xs px-2 py-1 bg-neon-green/20 text-emerald-600 rounded">
+                          {batchGeneratedContents.length > 1 ? '批量已生成' : '已生成'}
+                        </span>
+                      )}
+                    </h3>
+                    
+                    {/* 批量生成内容切换器 */}
+                    {batchGeneratedContents.length > 1 && (
+                      <div className="mb-4 p-3 bg-violet-50 border border-violet-200 rounded-lg">
+                        <div className="text-xs text-violet-700 mb-2 flex items-center gap-1">
+                          <FileText className="w-3 h-3" /> 批量生成内容列表（共{batchGeneratedContents.length}条）
+                        </div>
+                        <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto">
+                          {batchGeneratedContents.map((content, idx) => (
+                            <button
+                              key={content.id}
+                              onClick={() => {
+                                setCurrentBatchIndex(idx);
+                                setGeneratedContent(content);
+                              }}
+                              className={`px-3 py-2 rounded-lg text-left text-xs transition-all ${
+                                idx === currentBatchIndex
+                                  ? 'bg-violet-600 text-white'
+                                  : 'bg-white text-gray-700 hover:bg-violet-100'
+                              }`}
+                            >
+                              <div className="font-medium truncate max-w-[120px]">{content.hotelName}</div>
+                              <div className="opacity-80 truncate max-w-[120px]">{content.title.slice(0, 15)}...</div>
+                            </button>
+                          ))}
+                        </div>
+                        <div className="flex items-center justify-between mt-2 pt-2 border-t border-violet-200">
+                          <button
+                            onClick={() => {
+                              const newIndex = Math.max(0, currentBatchIndex - 1);
+                              setCurrentBatchIndex(newIndex);
+                              setGeneratedContent(batchGeneratedContents[newIndex]);
+                            }}
+                            disabled={currentBatchIndex === 0}
+                            className="text-xs px-2 py-1 bg-white rounded disabled:opacity-50"
+                          >
+                            ← 上一个
+                          </button>
+                          <span className="text-xs text-violet-700">
+                            {currentBatchIndex + 1} / {batchGeneratedContents.length}
+                          </span>
+                          <button
+                            onClick={() => {
+                              const newIndex = Math.min(batchGeneratedContents.length - 1, currentBatchIndex + 1);
+                              setCurrentBatchIndex(newIndex);
+                              setGeneratedContent(batchGeneratedContents[newIndex]);
+                            }}
+                            disabled={currentBatchIndex === batchGeneratedContents.length - 1}
+                            className="text-xs px-2 py-1 bg-white rounded disabled:opacity-50"
+                          >
+                            下一个 →
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {generatedContent ? (
+                      <div className="space-y-4 max-h-[600px] overflow-y-auto">
+                        {/* 标题 */}
+                        <div className="p-3 bg-gray-50 rounded-lg">
+                          <div className="text-xs text-gray-500 mb-1">标题</div>
+                          <div className="font-medium text-sm">{generatedContent.title}</div>
+                        </div>
+                        
+                        {/* 视频脚本预览（仅视频类型） */}
+                        {generatedContent.contentType === 'video' && generatedContent.videoScript && (
+                          <div className="p-3 bg-neon-purple/10 border border-neon-purple/30 rounded-lg">
+                            <div className="flex items-center gap-2 mb-2">
+                              <Mic size={14} className="text-neon-purple" />
+                              <span className="text-sm font-medium text-neon-purple">视频脚本概览</span>
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              总时长: {generatedContent.videoScript.totalDuration}秒 · 
+                              {generatedContent.videoScript.scenes.length}个场景
+                            </div>
+                            <div className="mt-2 space-y-1">
+                              {generatedContent.videoScript.scenes.slice(0, 3).map((scene, idx) => (
+                                <div key={idx} className="text-xs p-2 bg-gray-100 rounded">
+                                  <span className="text-violet-600">{scene.startTime}-{scene.endTime}s</span>
+                                  <span className="text-gray-500 ml-2">{scene.shot}</span>
+                                </div>
+                              ))}
+                              {generatedContent.videoScript.scenes.length > 3 && (
+                                <div className="text-xs text-gray-500 text-center py-1">
+                                  ...还有{generatedContent.videoScript.scenes.length - 3}个场景
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* 微信群运营脚本预览 */}
+                        {generatedContent.groupScript && (
+                          <div className="p-3 bg-emerald-50 border border-neon-green/30 rounded-lg">
+                            <div className="flex items-center gap-2 mb-2">
+                              <Mic size={14} className="text-emerald-600" />
+                              <span className="text-sm font-medium text-emerald-600">
+                                群运营脚本 · {generatedContent.groupScript.type === 'welcome' ? '欢迎语' : generatedContent.groupScript.type === 'flashsale' ? '闪购' : generatedContent.groupScript.type === 'interaction' ? '互动' : '公告'}
+                              </span>
+                            </div>
+                            {generatedContent.groupScript.atAll && (
+                              <div className="text-xs text-amber-600 mb-2">@所有人</div>
+                            )}
+                            <div className="text-xs text-gray-500 whitespace-pre-wrap line-clamp-4">
+                              {generatedContent.groupScript.content}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* 私聊话术预览 */}
+                        {generatedContent.privateScript && (
+                          <div className="p-3 bg-violet-50 border border-violet-200 rounded-lg">
+                            <div className="flex items-center gap-2 mb-2">
+                              <Mic size={14} className="text-violet-600" />
+                              <span className="text-sm font-medium text-violet-600">
+                                私聊话术 · {generatedContent.privateScript.type === 'welcome' ? '新好友' : generatedContent.privateScript.type === 'followup' ? '回访' : generatedContent.privateScript.type === 'rebooking' ? '复购引导' : '预订咨询'}
+                              </span>
+                            </div>
+                            <div className="text-xs text-gray-500 whitespace-pre-wrap line-clamp-4">
+                              {generatedContent.privateScript.content}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* 文案预览 */}
+                        <div className="p-3 bg-gray-50 rounded-lg">
+                          <div className="text-xs text-gray-500 mb-1">文案预览</div>
+                          <div className="text-sm text-gray-500 whitespace-pre-wrap line-clamp-6">
+                            {generatedContent.content}
+                          </div>
+                        </div>
+                        
+                        {/* 图片预览 */}
+                        {generatedContent.images.length > 0 && (
+                          <div>
+                            <div className="text-xs text-gray-500 mb-2 flex items-center justify-between">
+                              <span>配图预览（点击替换）</span>
+                              <span className="text-[10px] text-violet-600">{generatedContent.images.length}张</span>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2">
+                              {generatedContent.images.slice(0, 6).map((imgId, idx) => {
+                                const img = uploadedImages.find(i => i.id === imgId) || findImageById(imgId);
+                                const isBeingReplaced = isReplacingImage && replacingImageIndex === idx;
+                                return (
+                                  <button
+                                    key={idx}
+                                    onClick={() => !isReplacingImage && handleReplaceImage(idx)}
+                                    disabled={isReplacingImage}
+                                    className="relative aspect-square rounded-lg overflow-hidden group hover:ring-2 hover:ring-violet-500 transition-all disabled:opacity-50"
+                                    title={isBeingReplaced ? '替换中...' : '点击替换此图片'}
+                                  >
+                                    <img src={img?.url || ''} alt="" className="w-full h-full object-cover" />
+                                    {/* 加载遮罩 */}
+                                    {isBeingReplaced && (
+                                      <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                                        <motion.div
+                                          animate={{ rotate: 360 }}
+                                          transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                                          className="w-6 h-6 border-2 border-white border-t-transparent rounded-full"
+                                        />
+                                      </div>
+                                    )}
+                                    {/* 悬停提示 */}
+                                    {!isBeingReplaced && (
+                                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-all flex items-center justify-center">
+                                        <span className="text-white text-xs opacity-0 group-hover:opacity-100 transition-all">
+                                          点击替换
+                                        </span>
+                                      </div>
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            {/* 隐藏的图片替换input */}
+                            <input
+                              ref={replaceImageInputRef}
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={handleImageReplaceUpload}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="h-96 flex flex-col items-center justify-center text-gray-500">
+                        <div className="w-16 h-16 rounded-full bg-gray-50 flex items-center justify-center mb-4">
+                          <Eye size={32} className="opacity-30" />
+                        </div>
+                        <p className="text-sm">点击左侧生成按钮</p>
+                        <p className="text-xs text-gray-500 mt-1">预览将在这里显示</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ===== 步骤3：导出发布 ===== */}
+            {currentStep === 3 && generatedContent && (
+              <div className="grid grid-cols-12 gap-6">
+                {/* 左侧：最终预览 */}
+                <div className="col-span-7">
+                  <div className="bg-gray-100 rounded-xl border border-gray-200 p-5">
+                    <h3 className="font-medium mb-4 flex items-center gap-2">
+                      <Eye size={16} className="text-violet-600" />
+                      最终预览
+                    </h3>
+                    
+                    {/* 平台样式预览 */}
+                    <div className="rounded-xl overflow-hidden shadow-2xl max-w-md mx-auto">
+                      {selectedPlatform === 'xianyu' && (
+                        <div className="bg-[#F6F7F9] text-gray-900">
+                          {/* 闲鱼顶部导航 */}
+                          <div className="bg-white px-4 py-3 flex items-center gap-3 border-b border-gray-100">
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center text-gray-900 text-xs font-bold">卖家</div>
+                            <div className="flex-1">
+                              <div className="text-sm font-medium">酒店小助手</div>
+                              <div className="text-xs text-gray-500">信用极好 | IP属地：北京</div>
+                            </div>
+                            <button className="px-3 py-1 border border-red-500 text-red-500 rounded-full text-xs">关注</button>
+                          </div>
+                          
+                          {/* 闲鱼图片区域 */}
+                          <div className="bg-white">
+                            <div className="flex overflow-x-auto snap-x snap-mandatory" style={{ scrollbarWidth: 'none' }}>
+                              {generatedContent.images.map((imgId, idx) => {
+                                const img = uploadedImages.find(i => i.id === imgId) || findImageById(imgId);
+                                return (
+                                  <div key={idx} className="flex-shrink-0 w-full snap-center aspect-square bg-gray-100">
+                                    <img src={img?.url || ''} alt="" className="w-full h-full object-cover" />
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                          
+                          {/* 闲鱼价格区域 */}
+                          <div className="bg-white px-4 py-3 border-b border-gray-100">
+                            <div className="flex items-baseline gap-2">
+                              <span className="text-2xl font-bold text-red-600">
+                                <span className="text-sm">¥</span>{pricing?.platformPrices?.[selectedPlatform as keyof typeof pricing.platformPrices] || 626}
+                              </span>
+                              <span className="text-sm text-gray-500 line-through">¥{Math.round((pricing?.basePrice || 580) * 1.2)}</span>
+                            </div>
+                          </div>
+                          
+                          {/* 闲鱼标题和内容 */}
+                          <div className="bg-white px-4 py-3 border-b border-gray-100">
+                            <h4 className="font-medium text-base leading-relaxed mb-2">{generatedContent.title}</h4>
+                            <div className="text-sm text-gray-400 leading-relaxed whitespace-pre-wrap">{generatedContent.content}</div>
+                          </div>
+                          
+                          {/* 闲鱼底部操作栏 */}
+                          <div className="bg-white px-4 py-3 flex items-center justify-end gap-4">
+                            <button className="px-6 py-2 bg-gradient-to-r from-yellow-400 to-orange-500 text-gray-900 rounded-full font-medium text-sm">
+                              我想要
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {selectedPlatform === 'xiaohongshu' && (
+                        <div className="bg-white text-gray-900">
+                          {/* 小红书顶部 */}
+                          <div className="px-4 py-3 flex items-center gap-3 border-b border-gray-50">
+                            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-pink-400 to-red-500 flex items-center justify-center text-gray-900 text-xs font-bold">酒店</div>
+                            <div className="flex-1">
+                              <div className="text-sm font-medium">{currentHotel.name}</div>
+                              <div className="text-xs text-gray-500">北京 · 酒店民宿</div>
+                            </div>
+                            <button className="px-4 py-1.5 bg-red-500 text-gray-900 rounded-full text-xs font-medium">关注</button>
+                          </div>
+                          
+                          {/* 小红书图片 */}
+                          <div className="flex overflow-x-auto snap-x snap-mandatory" style={{ scrollbarWidth: 'none' }}>
+                            {generatedContent.images.map((imgId, idx) => {
+                              const img = uploadedImages.find(i => i.id === imgId) || findImageById(imgId);
+                              return (
+                                <div key={idx} className="flex-shrink-0 w-full snap-center aspect-[3/4] bg-gray-100">
+                                  <img src={img?.url || ''} alt="" className="w-full h-full object-cover" />
+                                </div>
+                              );
+                            })}
+                          </div>
+                          
+                          {/* 小红书互动栏 */}
+                          <div className="px-4 py-3 flex items-center gap-6 border-b border-gray-50">
+                            <div className="flex items-center gap-1.5">
+                              <svg className="w-6 h-6" fill="#ff2442" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+                              <span className="text-sm">128</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                              <span className="text-sm">23</span>
+                            </div>
+                          </div>
+                          
+                          {/* 小红书内容区域 */}
+                          <div className="px-4 py-3">
+                            <h4 className="font-medium text-base mb-2">{generatedContent.title}</h4>
+                            <div className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{generatedContent.content}</div>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {selectedPlatform === 'wechat' && (
+                        <div className="bg-black text-gray-900">
+                          <div className="aspect-[9/16] relative">
+                            {generatedContent.images[0] && (
+                              <img 
+                                src={(uploadedImages.find(i => i.id === generatedContent.images[0]) || findImageById(generatedContent.images[0]))?.url} 
+                                alt="" 
+                                className="absolute inset-0 w-full h-full object-cover"
+                              />
+                            )}
+                            <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/60" />
+                            <div className="absolute left-4 right-16 bottom-4">
+                              <div className="text-sm mb-2">{generatedContent.title}</div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {selectedPlatform === 'douyin' && (
+                        <div className="bg-black text-white">
+                          <div className="aspect-[9/16] relative">
+                            {generatedContent.images[0] && (
+                              <img 
+                                src={(uploadedImages.find(i => i.id === generatedContent.images[0]) || findImageById(generatedContent.images[0]))?.url} 
+                                alt="" 
+                                className="absolute inset-0 w-full h-full object-cover"
+                              />
+                            )}
+                            <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/60" />
+                            {/* 抖音右侧按钮区 */}
+                            <div className="absolute right-2 bottom-20 flex flex-col items-center gap-4">
+                              <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
+                                <Heart size={20} fill="white" />
+                              </div>
+                              <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
+                                <span className="text-xs">💬</span>
+                              </div>
+                              <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
+                                <span className="text-xs">↗️</span>
+                              </div>
+                            </div>
+                            {/* 抖音底部文字 */}
+                            <div className="absolute left-4 right-16 bottom-4">
+                              <h4 className="font-bold text-lg mb-1 drop-shadow-lg">{generatedContent.title}</h4>
+                              <p className="text-sm text-white/90 drop-shadow line-clamp-2">{generatedContent.content.slice(0, 50)}...</p>
+                              <div className="mt-2 flex items-center gap-2 text-xs text-white/70">
+                                <span className="bg-white/20 px-2 py-0.5 rounded">原相机</span>
+                                <span>真实无滤镜</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 右侧：操作按钮 */}
+                <div className="col-span-5 space-y-4">
+                  {/* 合规检测面板 */}
+                  {generatedContent && (
+                    <ComplianceChecker
+                      content={generatedContent.content + '\n' + generatedContent.title}
+                      platform={generatedContent.platform}
+                      contentType={generatedContent.contentType === 'video' ? 'video' : 'image'}
+                      source="content_factory"
+                      contentId={generatedContent.id}
+                      onViolationsChange={(violations, passed) => {
+                        setComplianceViolations(violations);
+                        setCompliancePassed(passed);
+                      }}
+                    />
+                  )}
+                  
+                  <div className="bg-gray-100 rounded-xl border border-gray-200 p-5">
+                    <h3 className="font-medium mb-4 flex items-center gap-2">
+                      <Send size={16} className="text-emerald-600" />
+                      发布操作
+                    </h3>
+                    
+                    <div className="space-y-3">
+                      {/* 复制文案 */}
+                      <button
+                        onClick={copyContent}
+                        className="w-full py-4 bg-gray-50 border border-gray-200 rounded-xl flex items-center justify-center gap-3 hover:border-neon-cyan transition-all"
+                      >
+                        {copySuccess ? <Check size={20} className="text-emerald-600" /> : <Copy size={20} />}
+                        <span className="font-medium">{copySuccess ? '已复制到剪贴板' : '复制文案内容'}</span>
+                      </button>
+                      
+                      {/* 确认发布 */}
+                      {generatedContent.status === 'draft' ? (
+                        <button
+                          onClick={publishContent}
+                          disabled={!compliancePassed || isComplianceChecking}
+                          className={`w-full py-4 rounded-xl font-semibold text-bg-primary flex items-center justify-center gap-3 transition-all ${
+                            compliancePassed && !isComplianceChecking
+                              ? 'bg-gradient-to-r from-neon-green to-emerald-500 hover:shadow-lg hover:shadow-neon-green/30'
+                              : 'bg-gray-300 cursor-not-allowed'
+                          }`}
+                        >
+                          {isComplianceChecking ? (
+                            <>
+                              <Loader2 size={20} className="animate-spin" />
+                              合规检测中...
+                            </>
+                          ) : !compliancePassed ? (
+                            <>
+                              <AlertTriangle size={20} />
+                              存在违规，请修改后发布
+                            </>
+                          ) : (
+                            <>
+                              <Send size={20} />
+                              确认发布到系统
+                            </>
+                          )}
+                        </button>
+                      ) : (
+                        <button
+                          disabled
+                          className="w-full py-4 bg-gray-50 border border-neon-green/30 text-emerald-600 rounded-xl flex items-center justify-center gap-3"
+                        >
+                          <Check size={20} />
+                          已发布
+                        </button>
+                      )}
+                      
+                      {/* 导出视频脚本（仅视频类型） */}
+                      {generatedContent.contentType === 'video' && generatedContent.videoScript && (
+                        <button
+                          onClick={() => {
+                            const vs = generatedContent.videoScript!;
+                            const scriptText = `【视频拍摄脚本】
+标题：${generatedContent.title}
+总时长：${vs.totalDuration}秒
+BGM：${vs.bgmRecommendation}
+
+【分镜脚本】
+${vs.scenes.map((s, i) => `
+场景${i + 1} (${s.startTime}-${s.endTime}秒)
+镜头：${s.shot}
+字幕：${s.subtitle}
+${s.tips ? `提示：${s.tips}` : ''}
+`).join('\n---\n')}
+
+【所需素材】
+${vs.materials.map(m => `- ${m.type === 'photo' ? '照片' : m.type === 'video' ? '视频' : '截图'}：${m.description} × ${m.count}`).join('\n')}
+
+【拍摄技巧】
+${vs.shootingTips.map(t => `• ${t}`).join('\n')}
+
+【剪辑建议】
+${vs.editingTips.map(t => `• ${t}`).join('\n')}
+`;
+                            navigator.clipboard.writeText(scriptText);
+                            toast.success('复制成功', '完整脚本已复制到剪贴板');
+                          }}
+                          className="w-full py-4 bg-neon-purple/10 border border-neon-purple/30 text-neon-purple rounded-xl flex items-center justify-center gap-3 hover:bg-neon-purple/20 transition-all"
+                        >
+                          <Download size={20} />
+                          导出完整拍摄脚本
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  
+                  {/* 视频脚本详情（仅视频类型） */}
+                  {generatedContent.contentType === 'video' && generatedContent.videoScript && (
+                    <div className="bg-gray-100 rounded-xl border border-gray-200 p-5">
+                      <h3 className="font-medium mb-3 flex items-center gap-2">
+                        <Clock size={16} className="text-violet-600" />
+                        分镜脚本
+                      </h3>
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {generatedContent.videoScript.scenes.map((scene, idx) => (
+                          <div key={idx} className="p-2 bg-gray-50 rounded-lg text-xs">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-violet-600 font-mono">{scene.startTime}-{scene.endTime}s</span>
+                              <span className="text-gray-500">{scene.shot}</span>
+                            </div>
+                            <div className="text-gray-500">{scene.subtitle}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* 底部按钮 */}
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setCurrentStep(2)}
+                      className="flex-1 py-3 bg-gray-50 border border-gray-200 rounded-xl font-medium hover:border-neon-cyan transition-all"
+                    >
+                      ← 返回修改
+                    </button>
+                    <button
+                      onClick={() => {
+                        setCurrentStep(1);
+                        setGeneratedContent(null);
+                        setSelectedImages([]);
+                      }}
+                      className="flex-1 py-3 bg-gradient-to-r from-violet-500 to-blue-500 rounded-xl font-semibold text-bg-primary hover:shadow-lg transition-all"
+                    >
+                      完成，新建内容
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 模板库 Tab */}
+      {activeTab === 'library' && (
+        <div className="space-y-6">
+          {/* 使用指南 */}
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-gradient-to-r from-neon-purple/10 to-neon-cyan/10 rounded-xl border border-neon-purple/30 p-5"
+          >
+            <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
+              <Sparkles className="text-neon-purple" size={20} />
+              {templateGuide.title}
+            </h3>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {templateGuide.tips.map((tip, idx) => (
+                <div key={idx} className="bg-gray-100/50 rounded-lg p-3 text-sm">
+                  <div className="text-gray-500 text-xs mb-1">{tip.scenario}</div>
+                  <div className="font-medium text-violet-600 mb-1">推荐：{contentTemplates[tip.template as keyof typeof contentTemplates]?.name}</div>
+                  <div className="text-xs text-text-hint">{tip.reason}</div>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+
+          {/* 模板列表 */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {Object.entries(contentTemplates).map(([key, template]) => (
+              <motion.div
+                key={key}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-gray-100 rounded-xl border border-gray-200 overflow-hidden"
+              >
+                {/* 模板头部 */}
+                <div className="p-5 border-b border-gray-200">
+                  <div className="flex items-start gap-4">
+                    <div className="p-2 rounded-lg" style={{ background: `${template.iconColor}15` }}>
+                      <template.icon 
+                        size={32} 
+                        style={{ color: template.iconColor }}
+                        strokeWidth={1.5}
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="text-lg font-semibold mb-1">{template.name}</h3>
+                      <p className="text-sm text-gray-500 mb-3">{template.desc}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {template.platforms.map(p => {
+                          const info = platformLogos[p];
+                          return (
+                            <span 
+                              key={p} 
+                              className="px-2 py-1 rounded text-xs"
+                              style={{ background: `${info.color}20`, color: info.color }}
+                            >
+                              {info.name}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* 适用场景 */}
+                  {template.scenarios && (
+                    <div className="mt-4 pt-4 border-t border-gray-200">
+                      <div className="text-xs text-gray-500 mb-2">适用场景</div>
+                      <div className="flex flex-wrap gap-2">
+                        {template.scenarios.map((scenario, idx) => (
+                          <span key={idx} className="px-2 py-1 bg-gray-50 rounded text-xs text-gray-500">
+                            {scenario}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 真实案例展示 */}
+                {template.realCases && (
+                  <div className="border-b border-gray-200">
+                    <div className="px-5 py-3 bg-gray-50/50 text-xs text-gray-500 flex items-center gap-2">
+                      <Eye size={14} />
+                      真实案例参考（{template.realCases.length}个）
+                    </div>
+                    <div className="divide-y divide-border-color">
+                      {template.realCases.slice(0, 2).map((caseItem, idx) => (
+                        <div key={idx} className="p-5 hover:bg-gray-50/30 transition-colors">
+                          <div className="flex items-start gap-3 mb-3">
+                            <span className="px-2 py-0.5 bg-violet-50 text-violet-600 text-xs rounded">案例{idx + 1}</span>
+                            <h4 className="font-medium text-sm flex-1 line-clamp-2">{caseItem.title}</h4>
+                          </div>
+                          
+                          {/* 文案预览 */}
+                          <div className="bg-black/20 rounded-lg p-3 mb-3 text-xs text-gray-500 line-clamp-4 font-mono whitespace-pre-wrap">
+                            {caseItem.type === 'image' && caseItem.imageContent
+                              ? caseItem.imageContent.content.slice(0, 200)
+                              : caseItem.type === 'video' && caseItem.videoScript
+                                ? caseItem.videoScript.scenes.map(s => s.shot).join(' / ').slice(0, 200)
+                                : ''}...
+                          </div>
+                          
+                          {/* 关键信息 */}
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div className="flex items-center gap-1.5 text-gray-500">
+                              <ImageIcon size={12} className="text-neon-purple" />
+                              <span className="truncate">{caseItem.photoTips}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-gray-500">
+                              <Clock size={12} className="text-amber-600" />
+                              <span>{caseItem.bestTime}</span>
+                            </div>
+                          </div>
+                          
+                          {/* 效果预期 */}
+                          <div className="mt-3 flex items-center gap-2 text-xs">
+                            <TrendingUp size={12} className="text-emerald-600" />
+                            <span className="text-emerald-600">{caseItem.engagement}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 操作按钮 */}
+                <div className="p-5 flex gap-3">
+                  <button
+                    onClick={() => {
+                      setSelectedTemplate(key);
+                      setActiveTab('generate');
+                    }}
+                    className="flex-1 py-2.5 bg-violet-100 text-violet-600 rounded-lg hover:bg-violet-200 transition-all font-medium"
+                  >
+                    使用此模板
+                  </button>
+                  {template.realCases && template.realCases.length > 2 && (
+                    <button className="px-4 py-2.5 border border-gray-200 rounded-lg text-gray-500 hover:border-neon-cyan hover:text-violet-600 transition-all text-sm">
+                      查看更多案例
+                    </button>
+                  )}
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 历史记录 Tab */}
+      {activeTab === 'history' && (
+        <div className="space-y-4">
+          {contentHistory.length === 0 ? (
+            <div className="text-center py-16 text-gray-500">
+              <History size={48} className="mx-auto mb-4 opacity-30" />
+              <p>暂无历史记录</p>
+              <p className="text-sm">生成的内容将保存在这里</p>
+            </div>
+          ) : (
+            contentHistory.map((content) => {
+              const info = platformLogos[content.platform];
+              return (
+                <motion.div
+                  key={content.id}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="bg-gray-100 rounded-xl border border-gray-200 p-4"
+                >
+                  <div className="flex items-start gap-4">
+                    <img 
+                      src={info.logo}
+                      alt={info.name}
+                      className="w-12 h-12 rounded-lg object-contain"
+                    />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-medium">{content.title}</span>
+                        <span className={`px-2 py-0.5 rounded text-xs ${
+                          content.status === 'published' 
+                            ? 'bg-neon-green/20 text-emerald-600'
+                            : 'bg-neon-amber/20 text-amber-600'
+                        }`}>
+                          {content.status === 'published' ? '已发布' : '草稿'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-4 text-xs text-gray-500">
+                        <span className="flex items-center gap-1">
+                          <Calendar size={12} />
+                          {formatTime(content.generatedAt)}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <LayoutTemplate size={12} />
+                          {contentTemplates[content.template as keyof typeof contentTemplates]?.name || content.template}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <ImageIcon size={12} />
+                          {content.images.length}张图片
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => loadHistory(content)}
+                        className="p-2 hover:bg-gray-50 rounded-lg transition-all"
+                        title="重新编辑"
+                      >
+                        <RotateCcw size={16} />
+                      </button>
+                      <button
+                        onClick={() => deleteHistory(content.id)}
+                        className="p-2 hover:bg-neon-red/20 text-red-600 rounded-lg transition-all"
+                        title="删除"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      {/* 图片库弹窗 */}
+      <AnimatePresence>
+        {showImageLibrary && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"
+            onClick={() => setShowImageLibrary(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-gray-100 rounded-xl border border-gray-200 p-6 w-full max-w-2xl max-h-[80vh] overflow-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-semibold">选择图片 ({selectedImages.length}/9)</h3>
+                  {selectedHotelIds.length === 1 && (
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      当前酒店：{hotels.find(h => h.id === selectedHotelIds[0])?.name} 
+                      <span className="text-violet-600">({getHotelImageLibrary(selectedHotelIds[0]).length}张可用)</span>
+                    </p>
+                  )}
+                  {selectedHotelIds.length > 1 && (
+                    <p className="text-xs text-amber-600 mt-0.5 flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3" /> 批量生成将自动使用各酒店专属图片，无需手动选择
+                    </p>
+                  )}
+                </div>
+                <button onClick={() => setShowImageLibrary(false)}>
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                {/* 单体模式：显示当前酒店专属图片 */}
+                {selectedHotelIds.length === 1 ? (
+                  getHotelImageLibrary(selectedHotelIds[0]).map((img) => (
+                    <button
+                      key={img.id}
+                      onClick={() => {
+                        if (selectedImages.includes(img.id)) {
+                          setSelectedImages(prev => prev.filter(id => id !== img.id));
+                        } else if (selectedImages.length < 9) {
+                          setSelectedImages(prev => [...prev, img.id]);
+                        }
+                      }}
+                      className={`relative aspect-square rounded-lg overflow-hidden border-2 transition-all ${
+                        selectedImages.includes(img.id)
+                          ? 'border-neon-cyan'
+                          : 'border-transparent hover:border-neon-cyan/50'
+                      }`}
+                    >
+                      <img src={img.url} alt={img.name} className="w-full h-full object-cover" />
+                      {selectedImages.includes(img.id) && (
+                        <div className="absolute inset-0 bg-violet-200 flex items-center justify-center">
+                          <Check size={24} className="text-gray-900" />
+                        </div>
+                      )}
+                      <div className="absolute bottom-0 left-0 right-0 bg-black/60 p-2">
+                        <div className="text-xs text-white truncate">{img.name}</div>
+                      </div>
+                    </button>
+                  ))
+                ) : (
+                  /* 批量模式：显示提示信息 */
+                  <div className="col-span-3 p-8 text-center">
+                    <div className="text-gray-400 mb-2">📸</div>
+                    <p className="text-sm text-gray-500">批量生成模式下</p>
+                    <p className="text-xs text-gray-400 mt-1">系统将自动为每家酒店匹配其专属图片</p>
+                    <div className="mt-4 text-left text-xs text-gray-500 bg-gray-50 p-3 rounded-lg">
+                      <p className="font-medium mb-2">各酒店将使用：</p>
+                      {selectedHotelIds.map(hotelId => {
+                        const hotel = hotels.find(h => h.id === hotelId);
+                        const imgCount = getHotelImageLibrary(hotelId).length;
+                        return (
+                          <div key={hotelId} className="flex justify-between py-1">
+                            <span>{hotel?.name}</span>
+                            <span className="text-violet-600">{imgCount}张图片</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="mt-4 flex justify-end gap-3">
+                <button
+                  onClick={() => setShowImageLibrary(false)}
+                  className="px-4 py-2 bg-gray-50 rounded-lg"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={() => setShowImageLibrary(false)}
+                  className="px-4 py-2 bg-neon-cyan text-bg-primary rounded-lg"
+                >
+                  确认选择 ({selectedImages.length})
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}

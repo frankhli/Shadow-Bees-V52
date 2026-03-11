@@ -1,0 +1,142 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: shadow-bees
+  
+  # PostgreSQL
+  datasource:
+    url: jdbc:postgresql://localhost:5432/shadowbees
+    username: sb_admin
+    password: ${DB_PASSWORD:shadowbees123}
+    driver-class-name: org.postgresql.Driver
+  
+  jpa:
+    hibernate:
+      ddl-auto: validate  # 生产环境用 validate，不自动建表
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+  
+  # Redis
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+  
+  # RabbitMQ
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: sb_mq
+    password: ${MQ_PASSWORD:shadowbees123}
+    virtual-host: shadowbees
+    listener:
+      simple:
+        concurrency: 5
+        max-concurrency: 10
+        acknowledge-mode: auto
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 1000ms
+
+# 日志
+logging:
+  level:
+    com.shadowbees: DEBUG
+    org.springframework.web: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+# 外部API配置（后期填写）
+external:
+  apis:
+    # PMS
+    pms:
+      lvye:
+        base-url: https://api.lvye.com
+        api-key: ${LVYE_API_KEY:}
+        timeout: 10000
+      zhongsoft:
+        base-url: https://api.zhongsoft.com
+        api-key: ${ZHONGSOFT_API_KEY:}
+        timeout: 10000
+    
+    # OTA
+    ota:
+      xiecheng:
+        base-url: https://openapi.ctrip.com
+        api-key: ${XIECHENG_API_KEY:}
+        api-secret: ${XIECHENG_SECRET:}
+        rate-limit: 100  # 每小时
+      meituan:
+        base-url: https://api.meituan.com
+        api-key: ${MEITUAN_API_KEY:}
+        rate-limit: 100
+    
+    # 事件API
+    events:
+      damai:
+        base-url: https://api.damai.cn
+        api-key: ${DAMAI_API_KEY:}
+      weather:
+        base-url: https://api.weather.com
+        api-key: ${WEATHER_API_KEY:}
+      map:
+        gaode:
+          base-url: https://restapi.amap.com
+          api-key: ${GAODE_MAP_API_KEY:}
+    
+    # 大模型
+    llm:
+      openai:
+        base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
+        api-key: ${OPENAI_API_KEY:}
+        model: gpt-4
+        max-tokens: 2000
+        temperature: 0.7
+      wenxin:
+        base-url: https://aip.baidubce.com
+        api-key: ${BAIDU_WENXIN_API_KEY:}
+        secret-key: ${BAIDU_WENXIN_SECRET:}
+        model: ernie-bot-4
+
+# Resilience4j 熔断限流配置
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+    instances:
+      pmsClient:
+        base-config: default
+      otaClient:
+        base-config: default
+      llmClient:
+        base-config: default
+  
+  ratelimiter:
+    configs:
+      default:
+        limit-for-period: 10
+        limit-refresh-period: 1s
+        timeout-duration: 0
+    instances:
+      otaXiecheng:
+        base-config: default
+      llmOpenAI:
+        limit-for-period: 20  # OpenAI 按分钟限流
+        limit-refresh-period: 1m

@@ -1,0 +1,14 @@
+# Shadow-Bees Robots.txt
+# https://www.robotstxt.org/robotstxt.html
+
+User-agent: *
+Allow: /
+
+# 禁止访问的路径
+Disallow: /api/
+Disallow: /admin/
+Disallow: /private/
+Disallow: /tmp/
+
+# 网站地图
+Sitemap: https://shadowbees.com/sitemap.xml

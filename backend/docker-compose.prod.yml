@@ -1,0 +1,155 @@
+# Shadow-Bees V2 生产环境 Docker Compose 配置
+# 使用方法:
+# 1. 复制 .env.production.template 为 .env.production 并填写配置
+# 2. 运行: docker-compose -f docker-compose.prod.yml up -d
+
+version: '3.8'
+
+services:
+  # ===========================================================================
+  # API Gateway - 统一入口
+  # ===========================================================================
+  gateway:
+    build:
+      context: ./packages/gateway
+      dockerfile: Dockerfile
+    container_name: sb-gateway
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - JWT_SECRET=${JWT_SECRET}
+      - FRONTEND_URL=${FRONTEND_URL}
+      - ADMIN_URL=${ADMIN_URL}
+      - GROUP_URL=${GROUP_URL}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - sb-network
+
+  # ===========================================================================
+  # Hotel Service - 酒店服务
+  # ===========================================================================
+  hotel-service:
+    build:
+      context: ./packages/services/hotel-service
+      dockerfile: Dockerfile
+    container_name: sb-hotel-service
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - sb-network
+
+  # ===========================================================================
+  # Order Service - 订单服务
+  # ===========================================================================
+  order-service:
+    build:
+      context: ./packages/services/order-service
+      dockerfile: Dockerfile
+    container_name: sb-order-service
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    environment:
+      - NODE_ENV=production
+      - PORT=3002
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - sb-network
+
+  # ===========================================================================
+  # Inventory Service - 库存服务
+  # ===========================================================================
+  inventory-service:
+    build:
+      context: ./packages/services/inventory-service
+      dockerfile: Dockerfile
+    container_name: sb-inventory-service
+    restart: unless-stopped
+    ports:
+      - "3003:3003"
+    environment:
+      - NODE_ENV=production
+      - PORT=3003
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - sb-network
+
+  # ===========================================================================
+  # Pricing Service - 定价服务
+  # ===========================================================================
+  pricing-service:
+    build:
+      context: ./packages/services/pricing-service
+      dockerfile: Dockerfile
+    container_name: sb-pricing-service
+    restart: unless-stopped
+    ports:
+      - "3004:3004"
+    environment:
+      - NODE_ENV=production
+      - PORT=3004
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - sb-network
+
+  # ===========================================================================
+  # Nginx - 反向代理和静态文件服务
+  # ===========================================================================
+  nginx:
+    image: nginx:alpine
+    container_name: sb-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ../../dist:/usr/share/nginx/html:ro
+    depends_on:
+      - gateway
+    networks:
+      - sb-network
+
+networks:
+  sb-network:
+    driver: bridge

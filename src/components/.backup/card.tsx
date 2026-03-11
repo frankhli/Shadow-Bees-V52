@@ -1,0 +1,56 @@
+import React from 'react';
+import { cn } from '@/lib/utils';
+
+interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
+  children: React.ReactNode;
+}
+
+export function Card({ className, children, ...props }: CardProps) {
+  return (
+    <div
+      className={cn(
+        'bg-bg-secondary border border-border-color rounded-xl overflow-hidden',
+        className
+      )}
+      {...props}
+    >
+      {children}
+    </div>
+  );
+}
+
+interface CardHeaderProps extends React.HTMLAttributes<HTMLDivElement> {
+  children: React.ReactNode;
+}
+
+export function CardHeader({ className, children, ...props }: CardHeaderProps) {
+  return (
+    <div className={cn('p-4 border-b border-border-color', className)} {...props}>
+      {children}
+    </div>
+  );
+}
+
+interface CardContentProps extends React.HTMLAttributes<HTMLDivElement> {
+  children: React.ReactNode;
+}
+
+export function CardContent({ className, children, ...props }: CardContentProps) {
+  return (
+    <div className={cn('p-4', className)} {...props}>
+      {children}
+    </div>
+  );
+}
+
+interface CardTitleProps extends React.HTMLAttributes<HTMLHeadingElement> {
+  children: React.ReactNode;
+}
+
+export function CardTitle({ className, children, ...props }: CardTitleProps) {
+  return (
+    <h3 className={cn('text-lg font-semibold text-text-primary', className)} {...props}>
+      {children}
+    </h3>
+  );
+}

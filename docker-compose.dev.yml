@@ -1,0 +1,74 @@
+# Shadow-Bees 开发环境 - Docker 方式启动
+version: '3.8'
+
+services:
+  # PostgreSQL 数据库
+  postgres:
+    image: postgres:15-alpine
+    container_name: sb-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: shadowbees
+      POSTGRES_USER: sb_admin
+      POSTGRES_PASSWORD: shadowbees123
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sb_admin -d shadowbees"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sb-network
+
+  # Redis 缓存
+  redis:
+    image: redis:7-alpine
+    container_name: sb-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - sb-network
+
+  # 前端开发服务器
+  frontend:
+    image: node:18-alpine
+    container_name: sb-frontend
+    working_dir: /app
+    volumes:
+      - .:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      - NODE_ENV=development
+      - VITE_USE_BACKEND=false
+      - VITE_GATEWAY_URL=http://localhost:3000/api
+    command: >
+      sh -c "npm install && npm run dev -- --host"
+    networks:
+      - sb-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  sb-network:
+    driver: bridge

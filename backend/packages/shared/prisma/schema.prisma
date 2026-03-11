@@ -1,0 +1,463 @@
+// Shadow-Bees V2 数据库 Schema
+// 基于 PocketBase Schema + 技术方案优化
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// 1. 用户与权限 (基于 PocketBase _pb_users_auth_)
+// ==========================================
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String   // 加密存储
+  name      String?
+  avatar    String?
+  role      UserRole @default(HOTEL_STAFF)
+  status    UserStatus @default(ACTIVE)
+  
+  // 关联
+  hotels    HotelUser[]
+  ordersCreated Order[] @relation("CreatedBy")
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+enum UserRole {
+  SUPER_ADMIN   // 平台超级管理员
+  ADMIN         // 平台管理员
+  GROUP_MANAGER // 集团管理员
+  HOTEL_MANAGER // 酒店店长
+  HOTEL_STAFF   // 酒店员工
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+// ==========================================
+// 2. 酒店 (基于 PocketBase hotels)
+// ==========================================
+model Hotel {
+  id          String   @id @default(uuid())
+  name        String
+  type        HotelType
+  tier        HotelTier
+  theme       HotelTheme
+  city        String
+  address     String?
+  coordinates Json?    // { lat: number, lng: number }
+  
+  // 运营配置
+  defaultMode     PricingMode @default(dynamic)
+  scriptStrategy  String?     // 话术策略
+  flexibleInventoryRate Float? @map("flexible_inventory_rate")
+  
+  // AI 定价策略 (技术方案中的 pricingConfig)
+  pricingConfig   Json?       @map("pricing_config")
+  inventoryMode   InventoryMode @default(dynamic) @map("inventory_mode")
+  
+  // 关联
+  users       HotelUser[]
+  roomTypes   RoomType[]
+  orders      Order[]
+  priceLogs   PriceLog[]
+  contents    Content[]
+  inventories RoomInventory[]
+  competitorPrices CompetitorPrice[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("hotels")
+}
+
+// 酒店-用户关联表
+model HotelUser {
+  id      String @id @default(uuid())
+  hotel   Hotel  @relation(fields: [hotelId], references: [id])
+  hotelId String @map("hotel_id")
+  user    User   @relation(fields: [userId], references: [id])
+  userId  String @map("user_id")
+  role    HotelUserRole @default(STAFF)
+  
+  createdAt DateTime @default(now())
+
+  @@unique([hotelId, userId])
+  @@map("hotel_users")
+}
+
+enum HotelUserRole {
+  OWNER
+  MANAGER
+  STAFF
+}
+
+enum HotelType {
+  city     // 城市商务
+  suburb   // 郊区度假
+  tourist  // 旅游景区
+}
+
+enum HotelTier {
+  economy  // 经济型
+  comfort  // 舒适型
+  premium  // 高端型
+}
+
+enum HotelTheme {
+  cyan    // 科技青
+  violet  // 奢华紫
+  amber   // 温暖黄
+}
+
+enum PricingMode {
+  clearance  // 尾房清仓
+  scalper    // 黄牛模式
+  dynamic    // 动态定价
+}
+
+enum InventoryMode {
+  tail    // 尾房模式
+  event   // 活动模式
+  dynamic // 动态模式
+}
+
+// ==========================================
+// 3. 房型 (基于 PocketBase room_types)
+// ==========================================
+model RoomType {
+  id        String @id @default(uuid())
+  hotel     Hotel  @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  hotelId   String @map("hotel_id")
+  
+  name            String
+  floorPrice      Decimal @map("floor_price") @db.Decimal(10, 2)
+  ceilingPrice    Decimal @map("ceiling_price") @db.Decimal(10, 2)
+  currentPrice    Decimal? @map("current_price") @db.Decimal(10, 2)
+  
+  // 库存配置
+  totalInventory      Int @map("total_inventory")
+  otaAllocation       Int @map("ota_allocation")
+  flexibleAllocation  Int @map("flexible_allocation")
+  
+  // 扩展属性
+  attributes  Json?
+  
+  // 关联
+  orders      Order[]
+  inventories RoomInventory[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("room_types")
+}
+
+// ==========================================
+// 4. 实时库存 (技术方案 RoomInventory)
+// ==========================================
+model RoomInventory {
+  id          String   @id @default(uuid())
+  hotel       Hotel    @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  hotelId     String   @map("hotel_id")
+  roomType    RoomType @relation(fields: [roomTypeId], references: [id], onDelete: Cascade)
+  roomTypeId  String   @map("room_type_id")
+  date        DateTime @db.Date
+  
+  // 双池库存 (技术方案核心)
+  otaPool     Int      @map("ota_pool")      // OTA 渠道库存
+  shadowPool  Int      @map("shadow_pool")   // 灵活库存 (Shadow-Bees 专供)
+  soldOta     Int      @default(0) @map("sold_ota")
+  soldShadow  Int      @default(0) @map("sold_shadow")
+  
+  // 乐观锁防超卖
+  version     Int      @default(0)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([hotelId, roomTypeId, date])
+  @@index([hotelId, date])
+  @@index([date])
+  @@map("room_inventories")
+}
+
+// ==========================================
+// 5. 订单 (基于 PocketBase orders)
+// ==========================================
+model Order {
+  id        String   @id @default(uuid())
+  orderNo   String   @unique @map("order_no")
+  
+  hotel     Hotel    @relation(fields: [hotelId], references: [id])
+  hotelId   String   @map("hotel_id")
+  roomType  RoomType @relation(fields: [roomTypeId], references: [id])
+  roomTypeId String @map("room_type_id")
+  
+  // 来源信息
+  platform        Platform
+  sourceContentId String?  @map("source_content_id")
+  
+  // 客户信息
+  customerName    String?  @map("customer_name")
+  customerPhone   String?  @map("customer_phone")
+  
+  // 入住信息
+  checkInDate     DateTime @map("check_in_date") @db.Date
+  checkOutDate    DateTime @map("check_out_date") @db.Date
+  nights          Int
+  
+  // 价格信息
+  price           Decimal  @db.Decimal(10, 2)
+  totalAmount     Decimal  @map("total_amount") @db.Decimal(10, 2)
+  platformFee     Decimal? @map("platform_fee") @db.Decimal(10, 2)
+  netRevenue      Decimal? @map("net_revenue") @db.Decimal(10, 2)
+  
+  // 状态和流程
+  status          OrderStatus @default(PENDING)
+  inventorySource InventorySource @default(SHADOW) @map("inventory_source")
+  
+  // 操作人
+  createdBy       User?    @relation("CreatedBy", fields: [createdById], references: [id])
+  createdById     String?  @map("created_by_id")
+  
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([hotelId, status])
+  @@index([hotelId, createdAt])
+  @@index([platform])
+  @@map("orders")
+}
+
+enum Platform {
+  xianyu       // 闲鱼
+  xiaohongshu  // 小红书
+  wechat       // 微信
+  douyin       // 抖音
+}
+
+enum OrderStatus {
+  PENDING      // 待支付
+  PAID         // 已支付
+  CHECKED_IN   // 已入住
+  CHECKED_OUT  // 已退房
+  INVOICED     // 已开票
+  REFUNDED     // 已退款
+  CANCELLED    // 已取消
+}
+
+enum InventorySource {
+  OTA          // 从 OTA 池扣减
+  SHADOW       // 从灵活池扣减
+}
+
+// ==========================================
+// 6. 价格审计日志 (技术方案 PriceLog)
+// ==========================================
+model PriceLog {
+  id          String   @id @default(uuid())
+  hotel       Hotel    @relation(fields: [hotelId], references: [id])
+  hotelId     String   @map("hotel_id")
+  roomTypeId  String?  @map("room_type_id")
+  
+  oldPrice    Decimal  @map("old_price") @db.Decimal(10, 2)
+  newPrice    Decimal  @map("new_price") @db.Decimal(10, 2)
+  aiSuggested Decimal? @map("ai_suggested") @db.Decimal(10, 2)
+  
+  reason      String   // 调价原因
+  triggeredBy TriggerType @map("triggered_by")
+  factors     Json?    // AI 决策因子
+  
+  createdAt   DateTime @default(now())
+
+  @@index([hotelId, createdAt])
+  @@map("price_logs")
+}
+
+enum TriggerType {
+  SYSTEM  // 系统自动
+  USER    // 人工调整
+  AI      // AI 建议
+}
+
+// ==========================================
+// 7. 内容/文案 (内容工厂)
+// ==========================================
+model Content {
+  id          String   @id @default(uuid())
+  hotel       Hotel    @relation(fields: [hotelId], references: [id])
+  hotelId     String   @map("hotel_id")
+  
+  platform    Platform
+  contentType ContentType @map("content_type")
+  
+  // 生成内容
+  title       String?
+  content     String?  @db.Text
+  images      String[] // 图片 URL 列表
+  
+  // AI 生成参数
+  prompt      String?  @db.Text
+  rawOutput   String?  @map("raw_output") @db.Text
+  
+  // 人工审核
+  status      ContentStatus @default(DRAFT)
+  humanEdit   String?  @map("human_edit") @db.Text
+  reviewedBy  String?  @map("reviewed_by")
+  reviewedAt  DateTime? @map("reviewed_at")
+  
+  // 发布信息
+  publishedAt DateTime? @map("published_at")
+  externalId  String?  @map("external_id") // 平台返回的ID
+  
+  // 效果数据
+  performance Json?    // { impressions, clicks, inquiries, conversions }
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([hotelId, platform])
+  @@index([status])
+  @@map("contents")
+}
+
+enum ContentType {
+  TEXT    // 纯文本
+  IMAGE   // 图文
+  VIDEO   // 视频
+}
+
+enum ContentStatus {
+  DRAFT     // 草稿
+  PENDING   // 待审核
+  APPROVED  // 已通过
+  REJECTED  // 已拒绝
+  PUBLISHED // 已发布
+  OFFLINE   // 已下线
+}
+
+// ==========================================
+// 8. 竞品价格监控
+// ==========================================
+model CompetitorPrice {
+  id          String   @id @default(uuid())
+  hotel       Hotel    @relation(fields: [hotelId], references: [id])
+  hotelId     String   @map("hotel_id")
+  
+  competitorName String @map("competitor_name")
+  platform    String   // 携程/美团/飞猪
+  price       Decimal  @db.Decimal(10, 2)
+  currency    String   @default("CNY")
+  
+  // 房型映射（可能不准确）
+  roomTypeHint String? @map("room_type_hint")
+  
+  // 抓取信息
+  scrapedAt   DateTime @map("scraped_at")
+  sourceUrl   String?  @map("source_url")
+  
+  createdAt   DateTime @default(now())
+
+  @@index([hotelId, scrapedAt])
+  @@map("competitor_prices")
+}
+
+// ==========================================
+// 9. 外部事件缓存 (演唱会/会展等)
+// ==========================================
+model ExternalEvent {
+  id          String   @id @default(uuid())
+  name        String
+  city        String
+  venue       String?
+  
+  eventType   EventType @map("event_type")
+  startDate   DateTime @map("start_date") @db.Date
+  endDate     DateTime? @map("end_date") @db.Date
+  
+  // 影响范围
+  expectedAttendance Int? @map("expected_attendance")
+  hotScore    Int?     // 热度评分 0-100
+  
+  // 来源信息
+  source      String   // 大麦/12306/高德
+  sourceId    String?  @map("source_id")
+  sourceUrl   String?  @map("source_url")
+  
+  // 关联酒店（基于地理位置计算）
+  affectedHotels Json? @map("affected_hotels") // [{ hotelId, distance }]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([city, startDate])
+  @@index([startDate])
+  @@map("external_events")
+}
+
+enum EventType {
+  CONCERT      // 演唱会
+  SPORTS       // 体育赛事
+  EXHIBITION   // 会展
+  FESTIVAL     // 节日活动
+  HOLIDAY      // 假期
+}
+
+// ==========================================
+// 10. AI 调用日志
+// ==========================================
+model AIRequestLog {
+  id          String   @id @default(uuid())
+  
+  requestType AIRequestType @map("request_type")
+  provider    String   // openai/alibaba/anthropic
+  model       String   // gpt-4/qwen-max
+  
+  // 请求/响应
+  prompt      String   @db.Text
+  response    String?  @db.Text
+  tokensUsed  Int?     @map("tokens_used")
+  cost        Decimal? @db.Decimal(10, 6) // 美元
+  
+  // 性能
+  latencyMs   Int      @map("latency_ms")
+  status      AIStatus
+  errorMsg    String?  @map("error_msg")
+  
+  // 关联业务
+  hotelId     String?  @map("hotel_id")
+  
+  createdAt   DateTime @default(now())
+
+  @@index([hotelId, createdAt])
+  @@index([requestType])
+  @@map("ai_request_logs")
+}
+
+enum AIRequestType {
+  PRICING_SUGGEST   // 定价建议
+  CONTENT_GENERATE  // 内容生成
+  CONTENT_REVIEW    // 内容审核
+  CHAT_REPLY        // 客服回复
+}
+
+enum AIStatus {
+  SUCCESS
+  FAILED
+  TIMEOUT
+}

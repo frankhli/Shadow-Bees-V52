@@ -1,0 +1,36 @@
+import React from 'react';
+import { cn } from '@/lib/utils';
+
+interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: 'default' | 'outline' | 'ghost' | 'destructive';
+  size?: 'sm' | 'md' | 'lg';
+}
+
+export function Button({ 
+  className, 
+  variant = 'default', 
+  size = 'md',
+  children,
+  ...props 
+}: ButtonProps) {
+  return (
+    <button
+      className={cn(
+        'inline-flex items-center justify-center rounded-lg font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed',
+        // Variants
+        variant === 'default' && 'bg-[#00F0FF] text-bg-primary hover:bg-[#00D0DD]',
+        variant === 'outline' && 'border border-border-color bg-transparent text-text-primary hover:bg-border-color',
+        variant === 'ghost' && 'bg-transparent text-text-primary hover:bg-border-color/50',
+        variant === 'destructive' && 'bg-red-500 text-white hover:bg-red-600',
+        // Sizes
+        size === 'sm' && 'h-8 px-3 text-xs',
+        size === 'md' && 'h-10 px-4 text-sm',
+        size === 'lg' && 'h-12 px-6 text-base',
+        className
+      )}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}

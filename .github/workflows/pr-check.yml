@@ -1,0 +1,88 @@
+name: PR Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  # ==========================================
+  # PR 标题检查
+  # ==========================================
+  pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR title
+        uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            style
+            refactor
+            test
+            chore
+          requireScope: false
+
+  # ==========================================
+  # 代码变更检查
+  # ==========================================
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.changes.outputs.frontend }}
+      backend: ${{ steps.changes.outputs.backend }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: dorny/paths-filter@v2
+        id: changes
+        with:
+          filters: |
+            frontend:
+              - 'src/**'
+              - 'package*.json'
+              - 'vite.config.ts'
+              - 'tsconfig*.json'
+            backend:
+              - 'backend/**'
+              - '!backend/pb_data/**'
+              - '!backend/pocketbase/**'
+
+  # ==========================================
+  # 前端快速检查
+  # ==========================================
+  frontend-quick:
+    needs: changes
+    if: ${{ needs.changes.outputs.frontend == 'true' }}
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - run: npm ci
+      
+      - name: Lint check
+        run: npx eslint src --ext .ts,.tsx --max-warnings=0 || echo "Lint issues found"
+      
+      - name: Type check
+        run: npx tsc --noEmit
+
+  # ==========================================
+  # 文件大小检查
+  # ==========================================
+  file-size:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Check large files
+        run: |
+          find . -type f -size +1M -not -path "./node_modules/*" -not -path "./.git/*" | head -20

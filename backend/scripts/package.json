@@ -1,0 +1,19 @@
+{
+  "name": "@shadow-bees/scripts",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "migrate:pb": "npx ts-node migrate-from-pocketbase.ts",
+    "seed": "cd ../packages/shared && npx prisma db seed"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.10.0",
+    "sqlite3": "^5.1.6",
+    "sqlite": "^5.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.3.3"
+  }
+}
